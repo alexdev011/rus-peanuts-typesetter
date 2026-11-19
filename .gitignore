@@ -1,0 +1,26 @@
+# Кэш Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Окружение
+.venv/
+env/
+venv/
+ENV/
+
+# Сборка через PyInstaller
+build/
+dist/
+*.spec
+
+# Папка с результатами работы программы и временные списки
+result/
+validation list.txt
+
+# Системные файлы и кэш редакторов
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+Desktop.ini
