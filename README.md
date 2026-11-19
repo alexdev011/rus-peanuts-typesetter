@@ -75,7 +75,7 @@
 
 1. Клонируем репозиторий:
    ```bash
-   git clone https://github.com/your-username/rus-peanuts-typesetter.git
+   git clone https://github.com/alexdev011/rus-peanuts-typesetter.git
    cd rus-peanuts-typesetter
    ```
 
