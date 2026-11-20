@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://imgur.com/a/J3AycnU" alt="RUS PEANUTS Logo" width="300">
+  <img src="https://imgur.com/CtgqWFm.png" alt="RUS PEANUTS Logo" width="300">
 </p>
 
 
