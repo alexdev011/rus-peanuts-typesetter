@@ -1,3 +1,8 @@
+<p align="center">
+  <img src="https://imgur.com/a/J3AycnU" alt="RUS PEANUTS Logo" width="300">
+</p>
+
+
 # RUS PEANUTS — Auto-Typesetter & Multi-Tool
 
 ![Python Version](https://img.shields.io/badge/python-3.9+-black?style=flat&logo=python)
