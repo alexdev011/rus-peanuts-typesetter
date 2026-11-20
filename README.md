@@ -1,5 +1,11 @@
 # RUS PEANUTS — Auto-Typesetter & Multi-Tool
 
+![Python Version](https://img.shields.io/badge/python-3.9+-black?style=flat&logo=python)
+![PyQt6](https://img.shields.io/badge/GUI-PyQt6-black?style=flat&logo=qt)
+![License](https://img.shields.io/badge/license-MIT-black?style=flat)
+![Status](https://img.shields.io/badge/release-v1.0-black?style=flat)
+
+
 Внутренняя утилита для автоматизации верстки и обработки стрипов Peanuts на русский язык.
 
 Программа убирает рутину: сама находит реплики и звуковые эффекты на скане, аккуратно затирает оригинальный английский текст и расставляет русский перевод из обычного `.txt` файла с правильными шрифтами, переносами и автоподгонкой размера.
