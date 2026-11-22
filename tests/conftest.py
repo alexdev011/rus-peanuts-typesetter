@@ -1,9 +1,9 @@
 """Общая обвязка характеризационных тестов.
 
-Тесты фиксируют ТЕКУЩЕЕ поведение comic_typesetter.py перед рефакторингом.
-Всё, что зависит от формы кода (как создать окно, как вызвать операцию
-Multi tool), спрятано в функции-адаптеры этого файла: при переезде на новые
-модули меняются только они, а сами тесты остаются как есть.
+Тесты зафиксировали поведение монолита comic_typesetter.py до рефакторинга;
+теперь они проверяют, что пакет rus_peanuts ведёт себя так же. Всё, что зависит
+от формы кода (как создать окно, как вызвать операцию Multi tool), спрятано
+в адаптеры этого файла.
 
 Эталоны:
   * tests/golden/*.json — числа и хэши, коммитятся;
@@ -35,20 +35,48 @@ sys.path.insert(0, str(ROOT))
 # ---------------------------------------------------------------- приложение
 
 @pytest.fixture(scope="session")
-def ct():
-    """Модуль comic_typesetter с поднятым QApplication и загруженными шрифтами."""
-    cwd = os.getcwd()
-    os.chdir(ROOT)  # init_fonts ищет ./fonts относительно текущей папки
-    try:
-        import comic_typesetter as module
-        from PyQt6.QtWidgets import QApplication
+def qt_app():
+    from PyQt6.QtWidgets import QApplication
 
-        app = QApplication.instance() or QApplication([])
-        module.init_fonts()
-        module._test_app = app
+    return QApplication.instance() or QApplication([])
+
+
+@pytest.fixture(scope="session")
+def typography(qt_app):
+    """Typography с настоящими шрифтами проекта (ищутся в ./fonts)."""
+    from rus_peanuts.typesetting.fonts import load_fonts
+    from rus_peanuts.typesetting.layout import Typography
+
+    cwd = os.getcwd()
+    os.chdir(ROOT)
+    try:
+        return Typography(load_fonts())
     finally:
         os.chdir(cwd)
-    return module
+
+
+@pytest.fixture
+def doc(typography):
+    from rus_peanuts.typesetting.document import Document
+
+    return Document(typography)
+
+
+def block_state(b):
+    """Состояние TextBlock в виде, в котором оно лежит в эталонах."""
+    return {
+        "text": b.text,
+        "is_bubble": b.is_reply,
+        "is_outlined": b.shadow,
+        "x": round(b.x, 2),
+        "y": round(b.y, 2),
+        "size": round(b.size, 2),
+        "width": round(b.width, 2),
+        "stretch": b.stretch,
+        "italic": b.italic,
+        "bold": b.bold,
+        "arch": b.arch,
+    }
 
 
 def fixture_path(*parts) -> Path:
@@ -114,14 +142,15 @@ def golden(request):
     return make
 
 
-# ------------------------------------------------- адаптер: тайпсеттер (UI)
+# ------------------------------------------------- адаптер: окно вёрстки
 
 class Typesetter:
     """Тонкая обёртка над MainWindow: единственное место, которое знает про его поля."""
 
-    def __init__(self, ct):
-        self.ct = ct
-        self.win = ct.MainWindow()
+    def __init__(self, typography):
+        from rus_peanuts.ui.main_window import MainWindow
+
+        self.win = MainWindow(typography)
 
     def load_image(self, path):
         self.win.load_image(str(path))
@@ -132,57 +161,36 @@ class Typesetter:
         return self
 
     @property
-    def bubbles(self):
-        return [tuple(int(v) for v in b) for b in self.win.detected_boxes]
+    def doc(self):
+        return self.win.document
 
     @property
-    def sounds(self):
-        return [tuple(int(v) for v in b) for b in self.win.detected_sfx]
-
-    @property
-    def blocks(self):
-        return list(self.win.text_blocks)
-
-    def block_state(self, b):
-        return {
-            "text": b.toPlainText(),
-            "is_bubble": b.is_bubble,
-            "is_outlined": b.is_outlined,
-            "x": round(b.pos().x(), 2),
-            "y": round(b.pos().y(), 2),
-            "size": round(b.current_size, 2),
-            "width": round(b.box_width, 2),
-            "stretch": b.current_stretch,
-            "italic": b.current_italic,
-            "bold": b.bold_level,
-            "arch": b.arch_amount,
-        }
+    def items(self):
+        return list(self.win.items)
 
     def snapshot(self):
-        return [self.block_state(b) for b in self.blocks]
+        return [block_state(b) for b in self.doc.blocks]
 
-    def select(self, *blocks):
+    def select(self, *items):
         self.win.scene.clearSelection()
-        for b in blocks:
-            b.setSelected(True)
-
-    def cleaned_image(self):
-        return self.win.current_cv_img
+        for it in items:
+            it.setSelected(True)
 
     def render(self, out_path, monkeypatch):
         """Сохраняет результат через настоящую кнопку «Сохранить (PNG)»."""
         import cv2
+        from rus_peanuts.ui import main_window
 
-        monkeypatch.setattr(self.ct.QFileDialog, "getSaveFileName",
+        monkeypatch.setattr(main_window.QFileDialog, "getSaveFileName",
                             staticmethod(lambda *a, **k: (str(out_path), "")))
-        monkeypatch.setattr(self.ct.QMessageBox, "information", staticmethod(lambda *a, **k: None))
+        monkeypatch.setattr(main_window.QMessageBox, "information", staticmethod(lambda *a, **k: None))
         self.win.save_result()
         return cv2.imread(str(out_path), cv2.IMREAD_UNCHANGED)
 
 
 @pytest.fixture
-def typesetter(ct):
-    ts = Typesetter(ct)
+def typesetter(typography):
+    ts = Typesetter(typography)
     yield ts
     ts.win.close()
     ts.win.deleteLater()

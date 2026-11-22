@@ -1,7 +1,7 @@
 """Переносы в Репликах: мягкий перенос (U+00AD) между слогами длинных русских слов."""
 import re
 
-SOFT_HYPHEN = "­"
+SOFT_HYPHEN = "\u00ad"
 _VOWELS = set("АЕЁИОУЫЭЮЯаеёиоуыэюя")
 _NO_SPLIT_BEFORE = "ЬЪЙьъй"
 _MIN_LENGTH = 7

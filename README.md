@@ -64,13 +64,30 @@
 ## Структура проекта
 
 ```text
-├── comic_typesetter.py    # Основной скрипт приложения
-├── fonts/                 # Папка со шрифтами
+├── comic_typesetter.py        # Точка входа (запуск и сборка .exe)
+├── rus_peanuts/
+│   ├── typesetting/           # Вёрстка: анализ стрипа, Документ, раскладка текста, шрифты
+│   ├── publishing/            # Multi tool: Нарезка, Квадрат, Датировка (numpy/Pillow)
+│   ├── ui/                    # Окно на PyQt6
+│   ├── app.py                 # Запуск приложения
+│   └── bootstrap.py           # Проверка зависимостей
+├── fonts/                     # Шрифты
 │   ├── Peanuts_by_me.ttf
 │   ├── MPMangaFont-Bold.ttf
-│   └── MPMangaFont-BoldShadow.ttf
-├── requirements.txt       # Список зависимостей
-└── README.md
+│   └── Mp Manga Bold Shadow.ttf
+├── tests/                     # Тесты (pytest), см. tests/conftest.py
+├── docs/adr/                  # Архитектурные решения
+├── GLOSSARY.md                # Словарь терминов проекта
+├── requirements.txt           # Зависимости
+└── requirements-dev.txt       # Зависимости для тестов
+```
+
+### Тесты
+
+```bash
+pip install -r requirements-dev.txt
+python tests/fetch_fixtures.py   # один раз: скопировать образцы стрипов из архива команды
+python -m pytest
 ```
 
 ---

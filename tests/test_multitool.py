@@ -166,7 +166,7 @@ def test_errors_go_to_log_not_exceptions(multitool, tmp_path):
 
 # ------------------------------------------------------- вкладка в окне
 
-def test_go_button_runs_selected_operation(ct, typesetter, multitool):
+def test_go_button_runs_selected_operation(typesetter, multitool):
     tab = typesetter.win.tab_multitool
     tab.rb_file.setChecked(True)
     tab.edit_path.setText(str(fixture_path("strips", "pe1963-04-08.png")).replace("\\", "/"))

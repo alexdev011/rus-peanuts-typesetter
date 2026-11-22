@@ -3,7 +3,7 @@ import pytest
 
 from rus_peanuts.typesetting.hyphenation import hyphenate_text, hyphenate_word
 
-SHY = "­"
+SHY = "\u00ad"
 
 
 def show(s):
