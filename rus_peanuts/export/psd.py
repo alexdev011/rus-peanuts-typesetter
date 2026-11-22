@@ -58,7 +58,7 @@ def text_layer(block: TextBlock, typography) -> TextLayer:
     stroke = max(1, round(typography.bold_pen_width(block) / 2)) if block.bold > 0 else 0
     return TextLayer(
         contents="\r".join(line.text for line in st.lines),
-        font=typography.fonts.postscript(block.is_reply, block.shadow),
+        font=block.font,
         size=round(st.size_px, 2),
         leading=round(st.leading_px, 2),
         x=round(block.x + (first.center_x if first else 0), 2),

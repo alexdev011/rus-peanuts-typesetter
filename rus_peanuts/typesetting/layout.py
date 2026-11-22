@@ -1,4 +1,4 @@
-"""Раскладка текста через Qt: шрифт, ширина колонки, Жирность и автоподбор кегля.
+"""Раскладка текста через Qt: Шрифт, ширина колонки, Жирность и автоподбор кегля.
 
 Один и тот же `Typography.style()` используется и для измерения (при расстановке),
 и для показа на холсте, поэтому размеры совпадают с тем, что видно на экране.
@@ -10,7 +10,7 @@ from PyQt6.QtGui import QBrush, QColor, QFont, QFontMetricsF, QGuiApplication, Q
 from PyQt6.QtWidgets import QGraphicsTextItem
 
 from .document import TextBlock
-from .fonts import Fonts
+from .fonts import FontLibrary
 from .hyphenation import SOFT_HYPHEN, hyphenate_text
 from .translation import Line
 
@@ -36,13 +36,13 @@ class SetText:
 
 
 class Typography:
-    def __init__(self, fonts: Fonts):
+    def __init__(self, fonts: FontLibrary):
         self.fonts = fonts
 
     # ------------------------------------------------------------------ стиль
 
     def font(self, block: TextBlock) -> QFont:
-        f = QFont(self.fonts.family(block.is_reply, block.shadow))
+        f = QFont(self.fonts.family(block.font))
         f.setPointSizeF(max(5.0, block.size))
         f.setStretch(block.stretch)
         f.setItalic(block.italic)
@@ -129,7 +129,7 @@ class Typography:
         bx, by, bw, bh = box[0], box[1], box[2], box[3]
         text = hyphenate_text(line.text.upper()) if line.is_reply else line.text.upper()
         block = TextBlock(
-            text=text, is_reply=line.is_reply, shadow=not line.is_reply,
+            text=text, is_reply=line.is_reply, font=self.fonts.default,
             x=0.0, y=0.0, width=bw,
             size=REPLY_START_SIZE if line.is_reply else SOUND_START_SIZE,
             arch=getattr(box, "arch", 0),

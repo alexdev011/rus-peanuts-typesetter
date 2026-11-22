@@ -24,6 +24,13 @@ validation list.txt
 *.swp
 Thumbs.db
 Desktop.ini
+# Свои шрифты команды: у них разные лицензии, в репозиторий не кладём.
+# Три основных шрифта программы уже в репозитории.
+fonts/*
+!fonts/Peanuts_by_me.ttf
+!fonts/MPMangaFont-Bold.ttf
+!fonts/Mp Manga Bold Shadow.ttf
+
 # Тестовые образцы стрипов (защищены авторским правом, в репозиторий не попадают)
 tests/fixtures/
 .pytest_cache/

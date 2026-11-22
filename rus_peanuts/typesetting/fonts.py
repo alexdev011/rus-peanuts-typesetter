@@ -1,10 +1,15 @@
-"""Шрифты вёрстки: Шрифт реплик и Шрифт звуков (Shadow и сплошное начертание).
+"""Набор шрифтов: шрифты, из которых для каждого Текстового блока выбирается свой.
 
-Файлы шрифтов ищутся рядом с программой и в системных папках Windows.
-Перед регистрацией в Qt семейство каждого шрифта переименовывается прямо
-в памяти, чтобы Qt не путал Shadow и обычный Bold одного семейства.
+Шрифты — файлы .ttf/.otf в папке `fonts` программы (и во встроенной в .exe).
+Команда добавляет свои шрифты туда же — меню «Шрифты → Добавить шрифты…».
+
+Шрифт блока хранится как PostScript-имя: по нему Фотошоп находит шрифт в PSD,
+и оно же записывается в файл проекта. В Qt каждый файл регистрируется под
+собственным уникальным именем семейства — иначе Qt путает начертания одного
+семейства (например, MP Manga Bold и MP Manga Bold Shadow).
 """
 import os
+import shutil
 import struct
 import sys
 from dataclasses import dataclass
@@ -12,126 +17,111 @@ from dataclasses import dataclass
 from PyQt6.QtCore import QByteArray
 from PyQt6.QtGui import QFontDatabase
 
-_UNIQUE_FAMILIES = {
-    "reply": "RusPeanuts_Dialogue",
-    "sound": "RusPeanuts_MangaSolid",
-    "sound_shadow": "RusPeanuts_MangaShadow",
-}
+# Шрифт реплик: им по умолчанию набирается каждый новый Текстовый блок
+DEFAULT_FONT = "PeanutsRusbyme-Regular"
+FALLBACK_FAMILY = "Comic Sans MS"  # если шрифта нет в Наборе
+FONT_EXTENSIONS = (".ttf", ".otf")
 
 
 @dataclass(frozen=True)
-class Fonts:
-    """Имена семейств Qt для каждого шрифта вёрстки и их PostScript-имена для Фотошопа."""
-    reply: str = "Comic Sans MS"
-    sound: str = "Arial Black"
-    sound_shadow: str = "Arial Black"
-    # Фотошоп выбирает шрифт по PostScript-имени; по умолчанию — как в PSD команды
-    reply_ps: str = "PeanutsRusbyme-Regular"
-    sound_ps: str = "MPMangaFontBold-Bold"
-    sound_shadow_ps: str = "MPMangaFontBold"
+class FontFace:
+    postscript: str     # ключ шрифта: в блоке, в проекте и в PSD
+    name: str           # как показывать в списке
+    family: str         # уникальное имя семейства в Qt
 
-    def family(self, is_reply: bool, shadow: bool) -> str:
-        if is_reply:
-            return self.reply
-        return self.sound_shadow if shadow else self.sound
 
-    def postscript(self, is_reply: bool, shadow: bool) -> str:
-        if is_reply:
-            return self.reply_ps
-        return self.sound_shadow_ps if shadow else self.sound_ps
+class FontLibrary:
+    """Набор шрифтов. `folder` — куда «Добавить шрифты…» копирует новые файлы."""
+
+    def __init__(self, folder: str | None = None):
+        self.folder = folder
+        self._faces: dict[str, FontFace] = {}
+
+    @property
+    def faces(self) -> list[FontFace]:
+        return sorted(self._faces.values(), key=lambda f: f.name.lower())
+
+    @property
+    def default(self) -> str:
+        return DEFAULT_FONT
+
+    def get(self, postscript: str) -> FontFace | None:
+        return self._faces.get(postscript)
+
+    def family(self, postscript: str) -> str:
+        """Семейство Qt для шрифта блока; неизвестный шрифт показывается Шрифтом реплик."""
+        face = self._faces.get(postscript) or self._faces.get(DEFAULT_FONT)
+        return face.family if face else FALLBACK_FAMILY
+
+    def add_file(self, path) -> FontFace | None:
+        """Регистрирует файл шрифта. None — файл не читается как шрифт."""
+        try:
+            with open(path, "rb") as f:
+                raw = f.read()
+        except OSError:
+            return None
+        stem = os.path.splitext(os.path.basename(path))[0]
+        postscript = postscript_name(raw) or stem
+        if postscript in self._faces:
+            return self._faces[postscript]
+        family = "RusPeanuts_" + "".join(ch for ch in postscript if ch.isalnum() or ch in "-_")
+        fid = QFontDatabase.addApplicationFontFromData(QByteArray(rename_ttf_family(raw, family)))
+        families = QFontDatabase.applicationFontFamilies(fid) if fid != -1 else []
+        if not families:
+            return None
+        # Имена внутри шрифтов часто бестолковы (у MP Manga Shadow нет слова Shadow),
+        # поэтому в списке шрифт называется как его файл — его легко переименовать.
+        face = FontFace(postscript=postscript, name=stem.replace("_", " "), family=families[0])
+        self._faces[postscript] = face
+        return face
+
+    def install(self, path) -> FontFace | None:
+        """Копирует файл шрифта в папку Набора и регистрирует его.
+
+        None — файл не шрифт (тогда он и не копируется). OSError — не удалось скопировать.
+        """
+        if not self.folder:
+            return self.add_file(path)
+        with open(path, "rb") as f:
+            if postscript_name(f.read()) is None:
+                return None
+        os.makedirs(self.folder, exist_ok=True)
+        target = os.path.join(self.folder, os.path.basename(path))
+        if os.path.normcase(os.path.abspath(path)) != os.path.normcase(os.path.abspath(target)):
+            shutil.copyfile(path, target)
+        return self.add_file(target)
+
+
+def program_dir() -> str:
+    return os.path.dirname(os.path.abspath(sys.argv[0]))
 
 
 def default_search_dirs() -> list[str]:
+    """Папки со шрифтами: встроенная в .exe, рядом с программой, в текущей папке."""
     dirs = []
     if hasattr(sys, "_MEIPASS"):
         dirs.append(os.path.join(sys._MEIPASS, "fonts"))
-        dirs.append(sys._MEIPASS)
-    exe_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-    dirs.extend([
-        os.path.join(exe_dir, "fonts"),
-        exe_dir,
-        os.path.abspath("fonts"),
-        os.path.abspath("."),
-    ])
-    if os.name == "nt":
-        local_app = os.environ.get("LOCALAPPDATA", "")
-        win_dir = os.environ.get("WINDIR", "C:\\Windows")
-        if local_app:
-            dirs.append(os.path.join(local_app, "Microsoft", "Windows", "Fonts"))
-        dirs.append(os.path.join(win_dir, "Fonts"))
+    dirs.append(os.path.join(program_dir(), "fonts"))
+    dirs.append(os.path.abspath("fonts"))
     return dirs
 
 
-def load_fonts(search_dirs=None) -> Fonts:
-    """Находит и регистрирует шрифты в Qt. Нужен уже созданный QApplication."""
-    found = {}
-    postscript = {}
+def load_fonts(search_dirs=None, folder=None) -> FontLibrary:
+    """Собирает Набор шрифтов из папок. Нужен уже созданный QApplication.
 
-    def register(key, filepath):
-        try:
-            with open(filepath, "rb") as f:
-                raw = f.read()
-            ps = postscript_name(raw)
-            if ps:
-                postscript[key] = ps
-            fid = QFontDatabase.addApplicationFontFromData(QByteArray(rename_ttf_family(raw, _UNIQUE_FAMILIES[key])))
-            if fid != -1:
-                fams = QFontDatabase.applicationFontFamilies(fid)
-                if fams:
-                    found[key] = fams[0]
-                    return
-        except Exception:
-            pass
-        fid = QFontDatabase.addApplicationFont(filepath)  # запасной вариант без переименования
-        if fid != -1:
-            fams = QFontDatabase.applicationFontFamilies(fid)
-            if fams:
-                found[key] = fams[0]
-
+    `folder` — куда добавлять новые шрифты (по умолчанию `fonts` рядом с программой).
+    """
+    library = FontLibrary(folder if folder is not None else os.path.join(program_dir(), "fonts"))
     seen = set()
-    font_files = []
     for d in (search_dirs if search_dirs is not None else default_search_dirs()):
-        if os.path.isdir(d):
-            try:
-                for fname in sorted(os.listdir(d)):
-                    low = fname.lower()
-                    if low.endswith((".ttf", ".otf")):
-                        full_p = os.path.normpath(os.path.join(d, fname))
-                        if full_p not in seen:
-                            seen.add(full_p)
-                            font_files.append((low, full_p))
-            except Exception:
-                pass
-
-    rules = [
-        ("reply", lambda low: "peanuts" in low),
-        ("sound", lambda low: "manga" in low and "shadow" not in low),
-        ("sound_shadow", lambda low: "shadow" in low and ("manga" in low or "mp" in low)),
-    ]
-    for key, matches in rules:
-        for low, full_p in font_files:
-            if key not in found and matches(low):
-                register(key, full_p)
-
-    # запасной поиск среди уже установленных семейств
-    all_fams = QFontDatabase.families()
-    for key, matches in rules:
-        if key not in found:
-            for fam in all_fams:
-                if matches(fam.lower()):
-                    found[key] = fam
-                    break
-
-    defaults = Fonts()
-    sound = found.get("sound", defaults.sound)
-    return Fonts(
-        reply=found.get("reply", defaults.reply),
-        sound=sound,
-        sound_shadow=found.get("sound_shadow", sound),
-        reply_ps=postscript.get("reply", defaults.reply_ps),
-        sound_ps=postscript.get("sound", defaults.sound_ps),
-        sound_shadow_ps=postscript.get("sound_shadow", defaults.sound_shadow_ps),
-    )
+        if not os.path.isdir(d):
+            continue
+        for fname in sorted(os.listdir(d)):
+            path = os.path.normcase(os.path.normpath(os.path.join(d, fname)))
+            if fname.lower().endswith(FONT_EXTENSIONS) and path not in seen:
+                seen.add(path)
+                library.add_file(os.path.join(d, fname))
+    return library
 
 
 def _tables(ttf_bytes: bytes) -> dict:

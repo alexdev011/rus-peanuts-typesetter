@@ -1,28 +1,30 @@
 """Главное окно: вкладка вёрстки (холст + панель кнопок) и вкладка Multi tool."""
 import os
 
-from PyQt6.QtCore import QProcess, QRectF, Qt
-from PyQt6.QtGui import QIcon, QKeySequence, QShortcut
+from PyQt6.QtCore import QProcess, QRectF, Qt, QUrl
+from PyQt6.QtGui import QDesktopServices, QFont, QIcon, QKeySequence, QPainter, QShortcut
 from PyQt6.QtWidgets import (
-    QFileDialog, QGraphicsScene, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
-    QPushButton, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
+    QButtonGroup, QComboBox, QFileDialog, QGraphicsScene, QHBoxLayout, QLabel, QMainWindow,
+    QMessageBox, QPushButton, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from rus_peanuts.export import psd
 from rus_peanuts.export.png import export_png
 from rus_peanuts.typesetting import analysis, project, translation
-from rus_peanuts.typesetting.document import Document, TextBlock
+from rus_peanuts.typesetting.document import BLACK, WHITE, Document, TextBlock
+from rus_peanuts.typesetting.fonts import FONT_EXTENSIONS
 from rus_peanuts.typesetting.layout import Typography
 
 from . import dialogs, embedded
 from rus_peanuts.typesetting.graphics import to_qpixmap
 
 from .block_item import BlockItem
-from .canvas import StripCanvasView
+from .canvas import DEFAULT_BRUSH, StripCanvasView
 from .multitool_tab import MultiToolQtTab
 
 
 cv2_to_qpixmap = to_qpixmap
+RECENT_FONTS = 5  # сколько недавних шрифтов показывать вверху списка
 
 
 class MainWindow(QMainWindow):
@@ -41,6 +43,7 @@ class MainWindow(QMainWindow):
         self.orig_qpixmap = None
         self.pixmap_item = None
         self.items: list[BlockItem] = []
+        self.recent_fonts: list[str] = []
         self._syncing = False
 
         root = QWidget()
@@ -66,7 +69,7 @@ class MainWindow(QMainWindow):
         ts_layout = QVBoxLayout(self.tab_typesetter)
         ts_layout.setContentsMargins(0, 4, 0, 0)
 
-        # Панель: файлы, отмена, вид выделенного текста, оригинал, справка
+        # Панель: файлы, отмена, вид выделенного текста (Шрифт и стиль), оригинал, справка
         bar = QHBoxLayout()
         self.btn_img = self._button("1. Стрип", self.open_image_dialog, "Загрузить стрип (PNG, JPG)")
         self.btn_txt = self._button("2. Перевод", self.open_txt_dialog, "Загрузить перевод (.txt)")
@@ -80,16 +83,24 @@ class MainWindow(QMainWindow):
         self.spin_stretch = self._spin(50, 400, 10, " %", self.set_stretch, "Растяжение шрифта по ширине")
         self.spin_bold = self._spin(0, 10, 1, "", self.set_bold, "Жирность: 0 — обычный, дальше толще")
         self.btn_italic = self._button("Курсив", self.set_italic, "Курсив", checkable=True)
-        self.btn_outline = self._button("Shadow / Обычный", self.toggle_selected_outline,
-                                        "Для звуков: Shadow или сплошной шрифт. Для реплик: жирнее / обычный")
         self.btn_arch = self._button("Изгиб", self.open_arch_dialog, "Изогнуть выделенный текст дугой вверх или вниз")
+        self.combo_font = QComboBox()
+        self.combo_font.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.combo_font.setMinimumContentsLength(18)
+        self.combo_font.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.combo_font.setMaxVisibleItems(25)
+        self.combo_font.view().setMinimumWidth(320)  # имена шрифтов в списке — своим шрифтом, они шире
+        self.combo_font.setToolTip("Шрифт выделенного текста. Свои шрифты — меню «Шрифты»")
+        self.combo_font.activated.connect(self._font_chosen)
+        bar.addWidget(self.combo_font)
+        bar.addSpacing(6)
         bar.addWidget(QLabel("Растяг"))
         bar.addWidget(self.spin_stretch)
         bar.addSpacing(6)
         bar.addWidget(QLabel("Жирность"))
         bar.addWidget(self.spin_bold)
         bar.addSpacing(6)
-        for w in (self.btn_italic, self.btn_outline, self.btn_arch):
+        for w in (self.btn_italic, self.btn_arch):
             bar.addWidget(w)
         bar.addStretch()
 
@@ -100,14 +111,33 @@ class MainWindow(QMainWindow):
         bar.addWidget(self.btn_guide)
         ts_layout.addLayout(bar)
 
+        # Второй ряд: Карандаш и строка состояния
+        tools = QHBoxLayout()
+        self.btn_pencil = self._button(
+            "✎ Карандаш", None,
+            "Закрашивать стрип левой кнопкой мыши (Esc — выключить).\n"
+            "Правая кнопка мыши всегда стирает белым — и без Карандаша.", checkable=True)
+        self.btn_pencil.toggled.connect(self.toggle_pencil)
+        self.btn_white = self._button("Белый", lambda *_: self.set_pencil_color(WHITE), "Карандаш белым", checkable=True)
+        self.btn_black = self._button("Чёрный", lambda *_: self.set_pencil_color(BLACK), "Карандаш чёрным", checkable=True)
+        self.pencil_colors = QButtonGroup(self)
+        self.pencil_colors.addButton(self.btn_white)
+        self.pencil_colors.addButton(self.btn_black)
+        self.btn_white.setChecked(True)
+        self.spin_brush = self._spin(2, 200, 2, " px", self.set_brush_size, "Толщина Карандаша и ластика")
+        for w in (self.btn_pencil, self.btn_white, self.btn_black, QLabel("Толщина"), self.spin_brush):
+            tools.addWidget(w)
+        tools.addSpacing(16)
         self.lbl_status = QLabel("Добро Пожаловать!")
         self.lbl_status.setStyleSheet("font-weight: bold; font-size: 12px;")
-        ts_layout.addWidget(self.lbl_status)
+        tools.addWidget(self.lbl_status, stretch=1)
+        ts_layout.addLayout(tools)
 
         self.scene = QGraphicsScene(self)
         self.scene.selectionChanged.connect(self.sync_style_controls)
         self.view = StripCanvasView(self.scene, self)
         ts_layout.addWidget(self.view)
+        self.spin_brush.setValue(DEFAULT_BRUSH)
 
         self.tab_multitool = MultiToolQtTab(self)
         self.tabs.addTab(self.tab_typesetter, "1. RUS PEANUTS — Auto-Typesetter")
@@ -116,7 +146,7 @@ class MainWindow(QMainWindow):
         self.shortcut_undo = QShortcut(QKeySequence("Ctrl+Z"), self)
         self.shortcut_undo.activated.connect(self.undo_action)
         self.init_menus()
-        self.sync_style_controls()
+        self.refresh_font_list()
 
     def _button(self, text, slot, tip=None, checkable=False) -> QPushButton:
         btn = QPushButton(text)
@@ -124,7 +154,8 @@ class MainWindow(QMainWindow):
         btn.setCheckable(checkable)
         if tip:
             btn.setToolTip(tip)
-        btn.clicked.connect(slot)
+        if slot:
+            btn.clicked.connect(slot)
         return btn
 
     def _spin(self, low, high, step, suffix, slot, tip) -> QSpinBox:
@@ -154,6 +185,10 @@ class MainWindow(QMainWindow):
         view.addAction("Вписать стрип в окно", QKeySequence("Ctrl+0"), self.view.fit)
         view.addAction("Крупнее", QKeySequence("Ctrl+="), lambda: self.view.zoom(1.25))
         view.addAction("Мельче", QKeySequence("Ctrl+-"), lambda: self.view.zoom(0.8))
+
+        fonts_menu = self.menuBar().addMenu("Шрифты")
+        self.act_add_fonts = fonts_menu.addAction("Добавить шрифты…", self.add_fonts_dialog)
+        fonts_menu.addAction("Открыть папку шрифтов", self.open_fonts_folder)
 
         help_menu = self.menuBar().addMenu("Справка")
         help_menu.addAction("Руководство", self.show_guide)
@@ -228,6 +263,8 @@ class MainWindow(QMainWindow):
                 self.load_txt(path)
             elif ext == project.EXTENSION:
                 self.load_project(path)
+            elif ext in FONT_EXTENSIONS:
+                self.add_fonts([path])
 
     def open_image_dialog(self):
         f, _ = QFileDialog.getOpenFileName(self, "Выбрать стрип", "", "Изображения (*.png *.jpg *.jpeg)")
@@ -301,25 +338,98 @@ class MainWindow(QMainWindow):
         self._set_on_selected("italic", bool(checked), TextBlock.set_italic)
 
     def sync_style_controls(self):
-        """Счётчики и «Курсив» показывают вид первого выделенного блока."""
+        """Шрифт, счётчики и «Курсив» показывают вид первого выделенного блока."""
         items = self.selected_items()
         self._syncing = True
         try:
-            for w in (self.spin_stretch, self.spin_bold, self.btn_italic, self.btn_outline, self.btn_arch):
+            for w in (self.combo_font, self.spin_stretch, self.spin_bold, self.btn_italic, self.btn_arch):
                 w.setEnabled(bool(items))
             if items:
                 b = items[0].block
                 self.spin_stretch.setValue(b.stretch)
                 self.spin_bold.setValue(b.bold)
                 self.btn_italic.setChecked(b.italic)
+                index = self.combo_font.findData(b.font)
+                self.combo_font.setPlaceholderText(f"нет шрифта: {b.font}")
+                self.combo_font.setCurrentIndex(index)
             else:
                 self.btn_italic.setChecked(False)
+                self.combo_font.setPlaceholderText("Шрифт")
+                self.combo_font.setCurrentIndex(-1)
         finally:
             self._syncing = False
 
-    def toggle_selected_outline(self):
-        self._edit_selected(lambda b: b.toggle_shadow())
-        self.sync_style_controls()  # у Реплики кнопка меняет Жирность
+    # ---------------------------------------------------------------- Шрифты
+
+    def refresh_font_list(self):
+        """Список шрифтов: недавние сверху, дальше весь Набор по алфавиту."""
+        library = self.typography.fonts
+        recent = [f for f in (library.get(ps) for ps in self.recent_fonts) if f]
+        self._syncing = True
+        try:
+            self.combo_font.clear()
+            for face in recent:
+                self._add_font_item(face)
+            if recent:
+                self.combo_font.insertSeparator(self.combo_font.count())
+            for face in library.faces:
+                self._add_font_item(face)
+        finally:
+            self._syncing = False
+        self.sync_style_controls()
+
+    def _add_font_item(self, face):
+        combo = self.combo_font
+        combo.addItem(face.name, face.postscript)
+        i = combo.count() - 1
+        combo.setItemData(i, QFont(face.family, 11), Qt.ItemDataRole.FontRole)  # имя — своим шрифтом
+        combo.setItemData(i, face.postscript, Qt.ItemDataRole.ToolTipRole)
+
+    def _font_chosen(self, index):
+        postscript = self.combo_font.itemData(index)
+        if postscript:
+            self.set_font(postscript)
+
+    def set_font(self, postscript):
+        if self._syncing or not self.selected_items():
+            return
+        self._set_on_selected("font", postscript, TextBlock.set_font)
+        if postscript in self.recent_fonts:
+            self.recent_fonts.remove(postscript)
+        self.recent_fonts.insert(0, postscript)
+        del self.recent_fonts[RECENT_FONTS:]
+        self.refresh_font_list()
+
+    def add_fonts_dialog(self):
+        files, _ = QFileDialog.getOpenFileNames(self, "Добавить шрифты", "", "Шрифты (*.ttf *.otf)")
+        if files:
+            self.add_fonts(files)
+
+    def add_fonts(self, paths) -> list:
+        """Копирует шрифты в папку Набора — они останутся и после перезапуска."""
+        added, failed = [], []
+        for path in paths:
+            try:
+                face = self.typography.fonts.install(path)
+            except OSError as e:
+                face, reason = None, str(e)
+            else:
+                reason = "не похоже на шрифт"
+            if face:
+                added.append(face)
+            else:
+                failed.append(f"{os.path.basename(path)}: {reason}")
+        self.refresh_font_list()
+        self.lbl_status.setText(f"Добавлено шрифтов: {len(added)}")
+        if failed:
+            QMessageBox.warning(self, "Шрифты", "Не удалось добавить:\n" + "\n".join(failed))
+        return added
+
+    def open_fonts_folder(self):
+        folder = self.typography.fonts.folder
+        if folder:
+            os.makedirs(folder, exist_ok=True)
+            QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
 
     def open_arch_dialog(self):
         items = self.selected_items()
@@ -330,6 +440,10 @@ class MainWindow(QMainWindow):
         dialogs.arch_dialog(self, items)
 
     def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape and self.btn_pencil.isChecked():
+            self.btn_pencil.setChecked(False)
+            event.accept()
+            return
         if event.key() == Qt.Key.Key_Delete:
             items = self.selected_items()
             if items:
@@ -342,16 +456,35 @@ class MainWindow(QMainWindow):
             return
         super().keyPressEvent(event)
 
-    # ---------------------------------------------------------------- Ластик
+    # -------------------------------------------------------------- Карандаш
+
+    def toggle_pencil(self, on):
+        self.view.set_pencil(on)
+        if on:
+            self.lbl_status.setText("Карандаш: рисуй левой кнопкой мыши. Esc — выключить.")
+
+    def set_pencil_color(self, color):
+        self.view.set_brush(color=color)
+        self.btn_pencil.setChecked(True)  # выбрал цвет — значит, хочешь рисовать
+
+    def set_brush_size(self, size):
+        self.view.set_brush(size=size)
 
     @property
-    def can_erase(self) -> bool:
-        return self.cleaned_pixmap is not None
+    def can_paint(self) -> bool:
+        return self.cleaned_pixmap is not None and not self.btn_orig.isChecked()
 
-    def erase_at(self, x, y):
-        if self.pixmap_item is not None and self.document.erase_spot(x, y):
-            self.cleaned_pixmap = cv2_to_qpixmap(self.document.image)
-            self.pixmap_item.setPixmap(self.cleaned_pixmap)
+    def paint(self, x0, y0, x1, y1, radius, color):
+        if self.pixmap_item is None or not self.document.paint(x0, y0, x1, y1, radius, color):
+            return
+        # На экране обновляется только закрашенный кусок — на больших Страницах это заметно быстрее
+        h, w = self.document.image.shape[:2]
+        left, top = max(0, min(x0, x1) - radius - 1), max(0, min(y0, y1) - radius - 1)
+        right, bottom = min(w, max(x0, x1) + radius + 2), min(h, max(y0, y1) + radius + 2)
+        painter = QPainter(self.cleaned_pixmap)
+        painter.drawPixmap(left, top, cv2_to_qpixmap(self.document.image[top:bottom, left:right]))
+        painter.end()
+        self.pixmap_item.setPixmap(self.cleaned_pixmap)
 
     # ------------------------------------------------------------- прочее
 

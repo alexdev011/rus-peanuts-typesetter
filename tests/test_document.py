@@ -5,7 +5,7 @@ import pytest
 
 from conftest import block_state, fixture_path
 from rus_peanuts.typesetting import analysis, translation
-from rus_peanuts.typesetting.document import FALLBACK_Y, Document, TextBlock
+from rus_peanuts.typesetting.document import BLACK, FALLBACK_Y, WHITE, Document, TextBlock
 
 DATA = Path(__file__).parent / "data"
 SHY = "\u00ad"
@@ -43,25 +43,23 @@ def test_text_is_uppercased_and_only_replies_get_soft_hyphens(doc):
     assert sound.text == "ПРИХОДИТЬ"
 
 
-def test_default_styles(doc):
+def test_every_new_block_gets_the_reply_font(doc):
+    """Реплики и Звуки ставятся Шрифтом реплик; другой Шрифт выбирают руками."""
     doc.set_translation(lines("- Привет!\nБАЦ!\n"))
     reply, sound = doc.blocks
-    assert (reply.shadow, reply.bold, reply.arch) == (False, 0, 0)
-    assert (sound.shadow, sound.bold, sound.arch) == (True, 0, 0)  # Звук по умолчанию — Shadow
+    assert reply.font == sound.font == "PeanutsRusbyme-Regular"
+    assert (reply.bold, reply.arch, sound.bold, sound.arch) == (0, 0, 0, 0)
 
 
 def block(**kw):
-    defaults = dict(text="X", is_reply=True, shadow=False, x=0, y=0, width=100, size=12)
+    defaults = dict(text="X", is_reply=True, font="PeanutsRusbyme-Regular", x=0, y=0, width=100, size=12)
     return TextBlock(**{**defaults, **kw})
 
 
-def test_shadow_button_means_different_things_for_reply_and_sound():
-    """«Shadow / Обычный»: у Реплики — Жирность 0 <-> 2, у Звука — Shadow <-> сплошной."""
-    reply, sound = block(is_reply=True), block(is_reply=False, shadow=True)
-    reply.toggle_shadow(), sound.toggle_shadow()
-    assert (reply.bold, reply.shadow, sound.bold, sound.shadow) == (2, False, 0, False)
-    reply.toggle_shadow(), sound.toggle_shadow()
-    assert (reply.bold, reply.shadow, sound.bold, sound.shadow) == (0, False, 0, True)
+def test_font_is_set_by_postscript_name():
+    b = block()
+    b.set_font("MPMangaFontBold")
+    assert b.font == "MPMangaFontBold"
 
 
 def test_limits():
@@ -162,18 +160,39 @@ def test_undo_restores_blocks_and_selection(loaded):
     assert loaded.undo() is None
 
 
-def test_undo_restores_erased_pixels(loaded):
+def test_undo_restores_painted_pixels(loaded):
     before = loaded.image.copy()
-    loaded.checkpoint()                 # так делает правая кнопка мыши перед Ластиком
-    assert loaded.erase_spot(50, 450)
+    loaded.checkpoint()                 # так делает холст перед каждым штрихом Карандаша
+    assert loaded.paint(50, 450, 50, 450, 12, WHITE)
     assert (loaded.image != before).any()
     loaded.undo()
     assert (loaded.image == before).all()
 
 
-def test_eraser_outside_image_does_nothing(loaded):
-    assert not loaded.erase_spot(-5, 10)
-    assert not loaded.erase_spot(10_000, 10)
+def test_pencil_paints_a_solid_line_in_white_or_black(doc):
+    import numpy as np
+
+    doc.open_strip(np.full((100, 200, 3), 128, np.uint8))
+    assert doc.paint(20, 50, 180, 50, 5, BLACK)
+    assert (doc.image[45:56, 20:181] == 0).all()                 # сплошная линия толщиной 11 px
+    assert (doc.image[50, 14] == 0).all() and (doc.image[50, 13] == 128).all()  # круглый конец
+    assert (doc.image[40, 100] == 128).all()                     # выше линии не задето
+    assert doc.paint(100, 50, 100, 50, 3, WHITE)                  # точка
+    assert (doc.image[47:54, 100] == 255).all()
+    assert set(np.unique(doc.image)) == {0, 128, 255}            # без сглаживания
+
+
+def test_pencil_out_of_reach_does_nothing_but_reaches_the_edge(loaded):
+    before = loaded.image.copy()
+    assert not loaded.paint(-30, 10, -20, 10, 12, BLACK)
+    assert not loaded.paint(10_000, 10, 10_000, 10, 12, BLACK)
+    assert (loaded.image == before).all()
+    assert loaded.paint(-5, 10, -5, 10, 12, BLACK)                # кисть задевает край стрипа
+    assert (loaded.image[10, 0:7] == 0).all()
+
+
+def test_pencil_without_strip_does_nothing(doc):
+    assert not doc.paint(5, 5, 6, 6, 3, BLACK)
 
 
 def test_history_keeps_last_40_states(loaded):
@@ -196,8 +215,8 @@ def test_loading_translation_onto_image_can_be_undone(doc):
     assert doc.blocks == []
 
 
-def test_new_translation_resets_eraser_edits(loaded):
-    loaded.erase_spot(50, 450)
+def test_new_translation_resets_pencil_edits(loaded):
+    loaded.paint(50, 450, 80, 450, 12, BLACK)
     loaded.set_translation(translation.read(DATA / "pe1963-04-08.txt"))
     assert (loaded.image == loaded.analysis.cleaned).all()
 

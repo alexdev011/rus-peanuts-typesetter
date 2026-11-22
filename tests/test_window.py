@@ -1,4 +1,4 @@
-"""Окно вёрстки: загрузка файлов, кнопки панели, Ластик, отмена, сохранение PNG."""
+"""Окно вёрстки: загрузка файлов, кнопки панели, Шрифты, Карандаш, отмена, сохранение PNG."""
 from pathlib import Path
 
 import pytest
@@ -99,14 +99,14 @@ def test_controls_show_selected_block_and_are_off_without_selection(loaded):
     assert ts.doc.history_size == 1  # показ значений не считается правкой
     win.scene.clearSelection()
     assert not any(w.isEnabled() for w in (win.spin_bold, win.spin_stretch, win.btn_italic,
-                                           win.btn_outline, win.btn_arch))
+                                           win.combo_font, win.btn_arch))
 
 
 def test_buttons_do_nothing_without_selection(loaded):
     ts = loaded
     before, history = ts.snapshot(), ts.doc.history_size
     ts.win.scene.clearSelection()
-    ts.win.toggle_selected_outline()
+    ts.win.set_font("MPMangaFontBold")
     ts.win.set_bold(7)
     assert ts.snapshot() == before
     assert ts.doc.history_size == history
@@ -143,14 +143,73 @@ def test_strip_is_fitted_to_window_and_zoom_works(loaded):
     win.hide()
 
 
-def test_shadow_button_toggles_selected(loaded, tmp_path):
-    txt = tmp_path / "t.txt"
-    txt.write_text("- Привет!\nБАЦ!\n", encoding="utf-8")
-    ts = loaded.load_txt(txt)
-    reply, sound = ts.items
-    ts.select(reply, sound)
-    ts.win.btn_outline.click()
-    assert (reply.block.bold, sound.block.shadow) == (2, False)
+# ---------------------------------------------------------------- Шрифты
+
+def choose_font(win, postscript):
+    """Как выбор в выпадающем списке шрифтов мышью."""
+    index = win.combo_font.findData(postscript)
+    assert index >= 0, postscript
+    win.combo_font.setCurrentIndex(index)
+    win.combo_font.activated.emit(index)
+
+
+def test_font_list_shows_the_whole_font_set(loaded):
+    combo = loaded.win.combo_font
+    names = {combo.itemData(i): combo.itemText(i) for i in range(combo.count())}
+    assert names["PeanutsRusbyme-Regular"] == "Peanuts by me"     # название — как у файла шрифта
+    assert names["MPMangaFontBold"] == "Mp Manga Bold Shadow"
+    assert "MPMangaFontBold-Bold" in names
+
+
+def test_choosing_a_font_changes_selected_blocks_and_can_be_undone(loaded):
+    ts = loaded
+    first, second, third = ts.items[0], ts.items[1], ts.items[2]
+    ts.select(first, second)
+    history = ts.doc.history_size
+    choose_font(ts.win, "MPMangaFontBold")
+    assert [it.block.font for it in ts.items] == ["MPMangaFontBold"] * 2 + ["PeanutsRusbyme-Regular"] * 2
+    assert ts.doc.history_size == history + 1
+    family = ts.win.typography.fonts.get("MPMangaFontBold").family
+    assert first.font().family() == family                       # видно на холсте
+    ts.select(third)
+    assert ts.win.combo_font.currentData() == "PeanutsRusbyme-Regular"
+    ts.win.btn_undo.click()
+    assert [it.block.font for it in ts.items] == ["PeanutsRusbyme-Regular"] * 4
+
+
+def test_recent_font_goes_to_the_top_of_the_list(loaded):
+    ts = loaded
+    ts.select(ts.items[0])
+    choose_font(ts.win, "MPMangaFontBold-Bold")
+    assert ts.win.combo_font.itemData(0) == "MPMangaFontBold-Bold"
+    assert ts.win.combo_font.currentData() == "MPMangaFontBold-Bold"
+
+
+def test_block_with_missing_font_is_shown_and_kept(loaded):
+    ts = loaded
+    ts.items[0].block.set_font("TroubleSide")
+    ts.select(ts.items[0])
+    combo = ts.win.combo_font
+    assert combo.currentIndex() == -1 and combo.placeholderText() == "нет шрифта: TroubleSide"
+    assert ts.items[0].block.font == "TroubleSide"
+
+
+def test_added_font_is_copied_and_listed(typography, tmp_path):
+    from conftest import ROOT, Typesetter
+    from rus_peanuts.typesetting.fonts import load_fonts
+    from rus_peanuts.typesetting.layout import Typography
+
+    empty = tmp_path / "fonts"
+    ts = Typesetter(Typography(load_fonts(search_dirs=[], folder=str(empty))))
+    assert ts.win.combo_font.count() == 0
+    not_a_font = tmp_path / "readme.ttf"
+    not_a_font.write_bytes(b"hello")
+    added = ts.win.add_fonts([str(ROOT / "fonts" / "Mp Manga Bold Shadow.ttf"), str(not_a_font)])
+    assert [f.postscript for f in added] == ["MPMangaFontBold"]
+    assert sorted(p.name for p in empty.iterdir()) == ["Mp Manga Bold Shadow.ttf"]
+    assert ts.win.combo_font.itemData(0) == "MPMangaFontBold"
+    assert ts.win.lbl_status.text() == "Добавлено шрифтов: 1"
+    ts.win.close()
 
 
 def test_delete_key_removes_selected_blocks(loaded):
@@ -183,14 +242,81 @@ def test_undo_button_undoes_and_restores_selection(loaded):
     assert ts.win.lbl_status.text() == "Действие отменено!"
 
 
-def test_eraser_and_undo(loaded):
-    ts = loaded
-    before = ts.doc.image.copy()
-    ts.win.checkpoint()
-    ts.win.erase_at(50, 450)
-    assert (ts.doc.image != before).any()
-    ts.win.undo_action()
+# --------------------------------------------------------------- Карандаш
+
+def drag(view, button, scene_points):
+    """Штрих мышью по холсту через точки стрипа."""
+    from PyQt6.QtCore import QEvent, QPointF
+    from PyQt6.QtGui import QMouseEvent
+    from PyQt6.QtWidgets import QApplication
+
+    def send(kind, pt, buttons):
+        pos = QPointF(view.mapFromScene(QPointF(*pt)))
+        ev = QMouseEvent(kind, pos, view.viewport().mapToGlobal(pos), button, buttons,
+                         Qt.KeyboardModifier.NoModifier)
+        QApplication.sendEvent(view.viewport(), ev)
+
+    send(QEvent.Type.MouseButtonPress, scene_points[0], button)
+    for pt in scene_points[1:]:
+        send(QEvent.Type.MouseMove, pt, button)
+    send(QEvent.Type.MouseButtonRelease, scene_points[-1], Qt.MouseButton.NoButton)
+
+
+@pytest.fixture
+def shown(loaded):
+    loaded.win.resize(1320, 860)
+    loaded.win.show()
+    loaded.win.view.zoom(1 / loaded.win.view.zoom_level)  # 100 %: точка стрипа = точка экрана
+    yield loaded
+    loaded.win.hide()
+
+
+def test_pencil_paints_black_stroke_and_one_undo_step(shown):
+    ts, win = shown, shown.win
+    win.btn_black.click()                       # выбор цвета включает Карандаш
+    assert win.btn_pencil.isChecked() and win.view.pencil
+    win.spin_brush.setValue(10)
+    before, history = ts.doc.image.copy(), ts.doc.history_size
+    win.view.centerOn(300, 440)
+    drag(win.view, Qt.MouseButton.LeftButton, [(250, 440), (300, 440), (350, 440)])
+    assert (ts.doc.image[436:445, 250:351] == 0).all()
+    assert ts.doc.history_size == history + 1
+    win.btn_undo.click()
     assert (ts.doc.image == before).all()
+
+
+def test_pencil_does_not_move_blocks(shown):
+    ts, win = shown, shown.win
+    item = ts.items[0]
+    win.btn_pencil.click()
+    start = item.pos()
+    center = item.sceneBoundingRect().center()
+    win.view.centerOn(center)
+    drag(win.view, Qt.MouseButton.LeftButton, [(center.x(), center.y()), (center.x() + 60, center.y() + 20)])
+    assert item.pos() == start and not item.isSelected()
+
+
+def test_right_button_erases_white_without_pencil(shown):
+    ts, win = shown, shown.win
+    assert not win.btn_pencil.isChecked()
+    win.view.centerOn(300, 440)
+    drag(win.view, Qt.MouseButton.RightButton, [(300, 440), (320, 440)])
+    assert (ts.doc.image[440, 300:321] == 255).all()
+
+
+def test_escape_turns_pencil_off(loaded):
+    win = loaded.win
+    win.btn_pencil.click()
+    QTest.keyClick(win, Qt.Key.Key_Escape)
+    assert not win.btn_pencil.isChecked() and not win.view.pencil and win.view.isInteractive()
+
+
+def test_no_painting_while_original_is_shown(loaded):
+    win = loaded.win
+    win.btn_orig.click()
+    assert not win.can_paint
+    win.btn_orig.click()
+    assert win.can_paint
 
 
 def test_new_image_keeps_translation_and_clears_history(loaded):

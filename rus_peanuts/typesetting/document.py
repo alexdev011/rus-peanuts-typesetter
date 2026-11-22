@@ -16,7 +16,10 @@ from .hyphenation import hyphenate_text
 from .translation import Line
 
 HISTORY_LIMIT = 40
-ERASER_RADIUS = 12
+
+# Цвета Карандаша (BGR, как картинка стрипа)
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
 
 # Запасной ряд мест вверху стрипа для строк, которым не нашлось места
 FALLBACK_X, FALLBACK_STEP, FALLBACK_Y, FALLBACK_W, FALLBACK_H = 80, 180, 45, 160, 70
@@ -26,8 +29,8 @@ FALLBACK_X, FALLBACK_STEP, FALLBACK_Y, FALLBACK_W, FALLBACK_H = 80, 180, 45, 160
 class TextBlock:
     """Русский текст одной Реплики или одного Звука на стрипе."""
     text: str               # как показывается, с мягкими переносами
-    is_reply: bool
-    shadow: bool            # начертание Shadow (имеет смысл для Звука)
+    is_reply: bool          # Реплика переносится по колонке, Звук стоит одной строкой
+    font: str               # Шрифт: PostScript-имя из Набора шрифтов
     x: float                # левый верхний угол текста
     y: float
     width: float            # ширина колонки Реплики
@@ -50,13 +53,8 @@ class TextBlock:
     def set_italic(self, on) -> None:
         self.italic = bool(on)
 
-    def toggle_shadow(self) -> None:
-        """Кнопка «Shadow / Обычный»: у Реплики — Жирность 0 <-> 2, у Звука — Shadow <-> сплошной."""
-        if self.is_reply:
-            self.bold = 2 if self.bold == 0 else 0
-            self.shadow = False
-        else:
-            self.shadow = not self.shadow
+    def set_font(self, postscript) -> None:
+        self.font = str(postscript)
 
     def set_arch(self, value) -> None:
         self.arch = max(-150, min(150, int(value)))
@@ -91,7 +89,7 @@ class Document:
         self.typography = typography
         self.analysis: StripAnalysis | None = None
         self.lines: list[Line] | None = None
-        self.image: np.ndarray | None = None      # очищенный стрип с правками Ластиком
+        self.image: np.ndarray | None = None      # очищенный стрип с правками Карандашом
         self.blocks: list[TextBlock] = []
         self._history: list = []
 
@@ -128,7 +126,7 @@ class Document:
 
     def _place(self) -> None:
         if self.analysis is not None:
-            self.image = self.analysis.cleaned.copy()  # правки Ластиком сбрасываются
+            self.image = self.analysis.cleaned.copy()  # правки Карандашом сбрасываются
         self.blocks = [self.typography.fit(line, box)
                        for line, box in assign_places(self.lines or [], self.bubbles, self.sounds)]
 
@@ -138,14 +136,23 @@ class Document:
         ids = {id(b) for b in blocks}
         self.blocks = [b for b in self.blocks if id(b) not in ids]
 
-    def erase_spot(self, x: int, y: int, radius: int = ERASER_RADIUS) -> bool:
-        """Ластик: белое пятно на стрипе. False — точка вне картинки."""
+    def paint(self, x0: int, y0: int, x1: int, y1: int, radius: int, color) -> bool:
+        """Карандаш: закрашивает стрип линией от (x0, y0) до (x1, y1) круглой кистью.
+
+        Цвет — WHITE или BLACK. Края без сглаживания, как у карандаша Фотошопа.
+        False — стрипа нет или кисть не достаёт до картинки.
+        """
         if self.image is None:
             return False
         h, w = self.image.shape[:2]
-        if not (0 <= x < w and 0 <= y < h):
+        r = max(0, int(radius))
+        if max(x0, x1) < -r or min(x0, x1) >= w + r or max(y0, y1) < -r or min(y0, y1) >= h + r:
             return False
-        cv2.circle(self.image, (x, y), radius, (255, 255, 255), -1)
+        color = tuple(int(c) for c in color)
+        cv2.circle(self.image, (x0, y0), r, color, -1)
+        if (x0, y0) != (x1, y1):
+            cv2.line(self.image, (x0, y0), (x1, y1), color, 2 * r + 1)
+            cv2.circle(self.image, (x1, y1), r, color, -1)
         return True
 
     # --------------------------------------------------------------- отмена

@@ -67,7 +67,7 @@ def block_state(b):
     return {
         "text": b.text,
         "is_bubble": b.is_reply,
-        "is_outlined": b.shadow,
+        "font": b.font,
         "x": round(b.x, 2),
         "y": round(b.y, 2),
         "size": round(b.size, 2),
@@ -240,4 +240,5 @@ def no_modal_dialogs(monkeypatch):
         monkeypatch.setattr(QMessageBox, name, staticmethod(lambda *a, **k: None))
     for name in ("getSaveFileName", "getOpenFileName"):
         monkeypatch.setattr(QFileDialog, name, staticmethod(lambda *a, **k: ("", "")))
+    monkeypatch.setattr(QFileDialog, "getOpenFileNames", staticmethod(lambda *a, **k: ([], "")))
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", staticmethod(lambda *a, **k: ""))

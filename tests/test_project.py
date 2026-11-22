@@ -13,7 +13,7 @@ DATA = Path(__file__).parent / "data"
 
 @pytest.fixture
 def edited(doc):
-    """Документ с типичными ручными правками: размер, курсив, Изгиб, Жирность, Ластик."""
+    """Документ с типичными ручными правками: размер, курсив, Изгиб, Жирность, Шрифт, Карандаш."""
     doc.open_strip(analysis.load_image(fixture_path("strips", "pe1963-04-12.png")),
                    translation.read(DATA / "pe1963-04-12_overflow.txt"))
     doc.blocks[0].size += 3
@@ -22,8 +22,8 @@ def edited(doc):
     doc.blocks[2].set_text("ДРУГОЙ ТЕКСТ РЕПЛИКИ")
     doc.blocks[5].set_arch(-35)
     doc.blocks[6].set_bold(1)
-    doc.blocks[6].toggle_shadow()
-    doc.erase_spot(100, 100)
+    doc.blocks[6].set_font("MPMangaFontBold")
+    doc.paint(100, 100, 140, 120, 6, (0, 0, 0))
     doc.remove([doc.blocks[3]])
     return doc
 
@@ -71,7 +71,29 @@ def test_file_layout_is_readable_zip(edited, tmp_path):
     with zipfile.ZipFile(path) as z:
         assert set(z.namelist()) == {"project.json", "original.png", "cleaned.png", "image.png"}
         meta = json.loads(z.read("project.json"))
-    assert (meta["format"], meta["version"]) == ("rus-peanuts-project", 1)
+    assert (meta["format"], meta["version"]) == ("rus-peanuts-project", 2)
+    assert [b["font"] for b in meta["blocks"]].count("MPMangaFontBold") == 1
+
+
+def test_version_1_project_gets_fonts_from_shadow_flag(edited, typography, tmp_path):
+    """Проект версии 1: у блоков флаг Shadow вместо Шрифта."""
+    src, dst = tmp_path / "v2.rpeanuts", tmp_path / "v1.rpeanuts"
+    project.save(edited, src)
+    with zipfile.ZipFile(src) as zin, zipfile.ZipFile(dst, "w") as zout:
+        for name in zin.namelist():
+            data = zin.read(name)
+            if name == "project.json":
+                meta = json.loads(data)
+                meta["version"] = 1
+                for b, shadow in zip(meta["blocks"][:3], (False, True, False)):
+                    del b["font"]
+                    b["shadow"] = shadow
+                meta["blocks"][1]["is_reply"] = meta["blocks"][2]["is_reply"] = False
+                data = json.dumps(meta).encode()
+            zout.writestr(name, data)
+    restored = project.load(dst, typography)
+    assert [b.font for b in restored.blocks[:3]] == ["PeanutsRusbyme-Regular", "MPMangaFontBold",
+                                                     "MPMangaFontBold-Bold"]
 
 
 @pytest.mark.parametrize("content", [b"not a zip", b""])

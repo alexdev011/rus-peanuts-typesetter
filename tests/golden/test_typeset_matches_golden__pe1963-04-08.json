@@ -4,7 +4,7 @@
   {
    "text": "ПО­КУП­КА ПЛАС­ТИ­НОК ПОД­НИ­МА­ЕТ МНЕ НАС­ТРО­Е­НИЕ... КОГДА МНЕ ГРУС­ТНО, Я ПО­КУ­ПАЮ НОВЫЕ ПЛАС­ТИН­КИ..",
    "is_bubble": true,
-   "is_outlined": false,
+   "font": "PeanutsRusbyme-Regular",
    "x": 252.34,
    "y": 35.0,
    "size": 21.0,
@@ -17,7 +17,7 @@
   {
    "text": "СЕ­ГОД­НЯ МНЕ БЫЛО ТАК ГРУС­ТНО, ЧТО Я КУПИЛ СКРИ­ПИЧ­НЫЙ КОН­ЦЕРТ МЕН­ДЕЛЬ­СО­НА, ВТОРОЙ ФОР­ТЕ­ПИ­АН­НЫЙ КОН­ЦЕРТ БРАМСА И ОДУ ГЕН­ДЕ­ЛЯ КО ДНЮ СВЯТОЙ ЦЕ­ЦИ­ЛИИ...",
    "is_bubble": true,
-   "is_outlined": false,
+   "font": "PeanutsRusbyme-Regular",
    "x": 593.52,
    "y": 33.5,
    "size": 22.0,
@@ -30,7 +30,7 @@
   {
    "text": "ОГО!",
    "is_bubble": true,
-   "is_outlined": false,
+   "font": "PeanutsRusbyme-Regular",
    "x": 1793.21,
    "y": 61.5,
    "size": 22.0,
@@ -43,7 +43,7 @@
   {
    "text": "НАС­КОЛЬ­КО ЖЕ МОЖНО ГРУС­ТИТЬ?",
    "is_bubble": true,
-   "is_outlined": false,
+   "font": "PeanutsRusbyme-Regular",
    "x": 84.8,
    "y": 42.5,
    "size": 14.5,

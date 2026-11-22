@@ -59,13 +59,13 @@ def test_text_layer_geometry_matches_qt_layout(loaded):
     assert (layer.hscale, layer.italic, layer.stroke, layer.warp) == (100, False, 0, 0)
 
 
-def test_fonts_use_postscript_names(doc):
-    fonts = doc.typography.fonts
+def test_layer_font_is_the_block_font(doc):
+    """Фотошоп находит шрифт по PostScript-имени — тому же, что хранится в блоке."""
     doc.set_translation(translation.parse("- Привет!\nБАЦ!\nБУМ!\n"))
-    doc.blocks[2].toggle_shadow()  # сплошное начертание
+    doc.blocks[1].set_font("MPMangaFontBold")
+    doc.blocks[2].set_font("TroubleSide")  # шрифта нет в программе — в PSD имя всё равно уходит
     names = [psd.text_layer(b, doc.typography).font for b in doc.blocks]
-    assert names == [fonts.reply_ps, fonts.sound_shadow_ps, fonts.sound_ps]
-    assert names == ["PeanutsRusbyme-Regular", "MPMangaFontBold", "MPMangaFontBold-Bold"]
+    assert names == ["PeanutsRusbyme-Regular", "MPMangaFontBold", "TroubleSide"]
 
 
 def test_styles_become_photoshop_effects(loaded):

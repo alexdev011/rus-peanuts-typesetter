@@ -4,8 +4,10 @@
   project.json  — версия формата, Текстовые блоки, Перевод, найденные места;
   original.png  — Оригинал;
   cleaned.png   — Оригинал после Очистки (нужен, чтобы заново расставить Перевод);
-  image.png     — очищенный стрип с правками Ластиком (то, что видно под текстом).
+  image.png     — очищенный стрип с правками Карандашом (то, что видно под текстом).
 История отмены в файл не попадает.
+
+Версии формата: 1 — у блока флаг Shadow вместо Шрифта; 2 — у блока свой Шрифт.
 """
 import json
 import zipfile
@@ -16,11 +18,15 @@ import numpy as np
 
 from .analysis import Box, SoundBox, StripAnalysis
 from .document import Document, TextBlock
+from .fonts import DEFAULT_FONT
 from .translation import Line
 
 EXTENSION = ".rpeanuts"
 FORMAT = "rus-peanuts-project"
-VERSION = 1
+VERSION = 2
+
+# Версия 1: Реплики — Шрифтом реплик, Звуки — MP Manga, Shadow или сплошным
+_V1_SOUND_FONTS = {True: "MPMangaFontBold", False: "MPMangaFontBold-Bold"}
 
 
 class ProjectError(Exception):
@@ -68,9 +74,17 @@ def load(path, typography) -> Document:
     )
     doc.image = image
     known = {f.name for f in fields(TextBlock)}
-    doc.blocks = [TextBlock(**{k: v for k, v in b.items() if k in known}) for b in meta["blocks"]]
+    doc.blocks = [TextBlock(**{k: v for k, v in _upgrade(b).items() if k in known}) for b in meta["blocks"]]
     doc.lines = None if meta["lines"] is None else [Line(**ln) for ln in meta["lines"]]
     return doc
+
+
+def _upgrade(block: dict) -> dict:
+    """Блок из проекта версии 1: флаг Shadow превращается в Шрифт."""
+    if "font" in block:
+        return block
+    font = DEFAULT_FONT if block.get("is_reply", True) else _V1_SOUND_FONTS[bool(block.get("shadow"))]
+    return {**block, "font": font}
 
 
 def _png(bgr: np.ndarray) -> bytes:
