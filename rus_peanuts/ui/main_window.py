@@ -16,6 +16,7 @@ from rus_peanuts.typesetting.fonts import FONT_EXTENSIONS
 from rus_peanuts.typesetting.layout import Typography
 
 from . import dialogs, embedded
+from .icons import cursor_icon
 from rus_peanuts.typesetting.graphics import to_qpixmap
 
 from .block_item import BlockItem
@@ -111,12 +112,18 @@ class MainWindow(QMainWindow):
         bar.addWidget(self.btn_guide)
         ts_layout.addLayout(bar)
 
-        # Второй ряд: Карандаш и строка состояния
+        # Второй ряд: инструмент (Курсор или Карандаш), цвет и толщина Карандаша, строка состояния
         tools = QHBoxLayout()
+        self.btn_cursor = self._button("Курсор", None, "Выделять и двигать текст (Esc)", checkable=True)
+        self.btn_cursor.setIcon(cursor_icon())
         self.btn_pencil = self._button(
             "✎ Карандаш", None,
-            "Закрашивать стрип левой кнопкой мыши (Esc — выключить).\n"
+            "Закрашивать стрип левой кнопкой мыши. Вернуться к выделению текста — «Курсор» или Esc.\n"
             "Правая кнопка мыши всегда стирает белым — и без Карандаша.", checkable=True)
+        self.tool_buttons = QButtonGroup(self)
+        self.tool_buttons.addButton(self.btn_cursor)
+        self.tool_buttons.addButton(self.btn_pencil)
+        self.btn_cursor.setChecked(True)
         self.btn_pencil.toggled.connect(self.toggle_pencil)
         self.btn_white = self._button("Белый", lambda *_: self.set_pencil_color(WHITE), "Карандаш белым", checkable=True)
         self.btn_black = self._button("Чёрный", lambda *_: self.set_pencil_color(BLACK), "Карандаш чёрным", checkable=True)
@@ -125,7 +132,8 @@ class MainWindow(QMainWindow):
         self.pencil_colors.addButton(self.btn_black)
         self.btn_white.setChecked(True)
         self.spin_brush = self._spin(2, 200, 2, " px", self.set_brush_size, "Толщина Карандаша и ластика")
-        for w in (self.btn_pencil, self.btn_white, self.btn_black, QLabel("Толщина"), self.spin_brush):
+        for w in (self.btn_cursor, self.btn_pencil, self.btn_white, self.btn_black, QLabel("Толщина"),
+                  self.spin_brush):
             tools.addWidget(w)
         tools.addSpacing(16)
         self.lbl_status = QLabel("Добро Пожаловать!")
@@ -312,7 +320,7 @@ class MainWindow(QMainWindow):
         undashed = translation.replies_without_dash(doc.lines)
         if undashed:
             names = ", ".join(f"«{ln.text[:20]}»" for ln in undashed[:2]) + (" …" if len(undashed) > 2 else "")
-            text += f" Без тире, но не в конце — поставлены как реплики: {names}"
+            text += f" Без тире до «Звуки:» — поставлены как реплики: {names}"
         self.lbl_status.setText(text)
 
     # ------------------------------------------------------- правка блоков
@@ -446,7 +454,7 @@ class MainWindow(QMainWindow):
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape and self.btn_pencil.isChecked():
-            self.btn_pencil.setChecked(False)
+            self.btn_cursor.setChecked(True)
             event.accept()
             return
         if event.key() == Qt.Key.Key_Delete:
@@ -466,7 +474,7 @@ class MainWindow(QMainWindow):
     def toggle_pencil(self, on):
         self.view.set_pencil(on)
         if on:
-            self.lbl_status.setText("Карандаш: рисуй левой кнопкой мыши. Esc — выключить.")
+            self.lbl_status.setText("Карандаш: рисуй левой кнопкой мыши. Вернуться к тексту — «Курсор» или Esc.")
 
     def set_pencil_color(self, color):
         self.view.set_brush(color=color)

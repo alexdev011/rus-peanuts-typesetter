@@ -13,7 +13,12 @@
    Крупные буквы без общего контура вокруг — тоже Звук, даже если рядом тесно.
 5. Не места: логотип PEANUTS (крупные буквы в прямоугольной рамке), подписи под
    стрипами (белое поле до края картинки), мелкие пометки рисунка — лица, трава,
-   подпись SCHULZ, дата (их буквы заметно мельче обычных букв реплик).
+   подпись SCHULZ, дата (их буквы заметно мельче обычных букв реплик). Трава и
+   подпись бывают и крупными: внизу кадра Бабл без единой буквы с «дыркой»
+   (A, B, D, O, P, R…) — не Бабл. Лицо «(•C•)» — несколько значков, в основном скобки.
+
+Очистка: Баблы стираются сразу (`cleaned`), а Звуки — только когда на них встаёт
+строка Перевода; для этого `sound_erase` помнит, какие пиксели чьи.
 
 Пороги в пикселях подобраны под сканы шириной ~2200 px.
 """
@@ -36,9 +41,9 @@ BIG_LETTERS = 1.25              # крупные буквы — во столь�
 LOOSE_HUG = 0.75                # у Бабла общий контур ловит хотя бы столько лучей
 MIN_REL = 0.7                   # буквы мельче этой доли обычных — пометки рисунка
 SOUND_MIN_REL = 0.75            # то же для Надписи на рисунке: там пометок больше (лица, трава)
-WATERMARK = (28, 0.35)          # надпись группы вверху слева на готовых стрипах: высота, доля ширины
 BUBBLE_PAD = (6, 5, 14, 5)      # поля места Реплики вокруг букв: слева, сверху, справа, снизу
 SOUND_PAD = (8, 8, 16, 8)
+LOW_IN_PANEL = 0.6              # центр Надписи ниже этой доли высоты кадра — «внизу кадра»
 
 
 class Box(NamedTuple):
@@ -63,7 +68,15 @@ class StripAnalysis:
     original: np.ndarray        # BGR, как прочитан с диска
     bubbles: list[Box]          # в Порядке чтения
     sounds: list[SoundBox]      # в Порядке чтения
-    cleaned: np.ndarray         # Оригинал после Очистки всех найденных мест
+    cleaned: np.ndarray         # Оригинал после Очистки Баблов
+    sound_erase: np.ndarray     # uint8: k+1 — пиксель, который стирается со Звуком k, 0 — ничей
+
+    def cleaned_with(self, sounds) -> np.ndarray:
+        """Очищенный стрип, на котором стёрты ещё и Звуки с этими номерами."""
+        image = self.cleaned.copy()
+        if len(sounds):
+            image[np.isin(self.sound_erase, [k + 1 for k in sounds])] = 255
+        return image
 
 
 def load_image(path) -> np.ndarray | None:
@@ -75,30 +88,28 @@ def load_image(path) -> np.ndarray | None:
 def analyze(img: np.ndarray) -> StripAnalysis:
     scan = _Scan(img)
     places = scan.lettering()
-    bubbles = [p for p in places if p.kind == "bubble"]
-    sounds = [p for p in places if p.kind == "sound"]
     H = img.shape[0]
-    bubble_boxes = [Box(*p.padded(BUBBLE_PAD, scan.W, scan.H)) for p in bubbles]
-    sound_boxes = [SoundBox(*p.padded(SOUND_PAD, scan.W, scan.H), scan.arch(p)) for p in sounds]
-    erase_mask = scan.erase_mask(bubble_boxes + [b[:4] for b in sound_boxes])
-    cleaned = _clean(img, erase_mask, bubble_boxes + sound_boxes)
-    return StripAnalysis(
-        original=img,
-        bubbles=_sort_reading_order(bubble_boxes, H),
-        sounds=_sort_reading_order(sound_boxes, H),
-        cleaned=cleaned,
-    )
+    bubbles = _sort_reading_order(
+        [Box(*p.padded(BUBBLE_PAD, scan.W, scan.H)) for p in places if p.kind == "bubble"], H)
+    sounds = _sort_reading_order(
+        [SoundBox(*p.padded(SOUND_PAD, scan.W, scan.H), scan.arch(p)) for p in places if p.kind == "sound"], H)
+    cleaned = img.copy()
+    cleaned[_spread(scan.erase_mask(bubbles), bubbles) > 0] = 255
+    sound_erase = np.zeros(img.shape[:2], np.uint8)
+    for k, box in enumerate(sounds[:255]):
+        spread = _spread(scan.erase_mask([box[:4]]), [box])
+        sound_erase[(spread > 0) & (sound_erase == 0)] = k + 1
+    return StripAnalysis(original=img, bubbles=bubbles, sounds=sounds, cleaned=cleaned, sound_erase=sound_erase)
 
 
-def _clean(orig_img, erase_mask, boxes):
-    cleaned = orig_img.copy()
+def _spread(erase_mask, boxes):
+    """Что стирать: стираемые буквы с каймой в 2 px (там серые края букв), только внутри мест."""
+    out = np.zeros_like(erase_mask)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     for b in boxes:
         x, y, w, h = b[0], b[1], b[2], b[3]
-        roi = erase_mask[y:y + h, x:x + w]
-        dilated = cv2.dilate(roi, kernel, iterations=1)
-        cleaned[y:y + h, x:x + w][dilated > 0] = [255, 255, 255]
-    return cleaned
+        out[y:y + h, x:x + w] |= cv2.dilate(erase_mask[y:y + h, x:x + w], kernel, iterations=1)
+    return out
 
 
 def _sort_reading_order(box_list, H):
@@ -172,13 +183,11 @@ class _Scan:
     def lettering(self) -> list[_Lettering]:
         stats, n = self.stats, self.n
         x, y, w, h, area = (stats[:, k] for k in range(5))
-        watermark = (y < WATERMARK[0]) & (x < self.W * WATERMARK[1])
-        watermark[0] = False
         big = (w > 48) | (h > 45) | (area > 800)
         small = h <= SMALL_MAX
         h_max = min(LETTER_H[1], int(self.H * 0.25))
         shape_ok = ((h >= LETTER_H[0]) & (h <= h_max) & (w >= 2) & (w <= h * np.where(small, 5.0, 3.0))
-                    & (area >= np.where(small, 8, 35)) & ~watermark)
+                    & (area >= np.where(small, 8, 35)))
         shape_ok[0] = False
         cand = np.zeros(n, bool)
         for i in np.nonzero(shape_ok)[0]:
@@ -186,7 +195,7 @@ class _Scan:
             if self.light_share(x[i] - pad, y[i] - pad, x[i] + w[i] + pad, y[i] + h[i] + pad, area[i]) > SURROUND:
                 cand[i] = True
 
-        barrier = watermark | (big & ~cand)
+        barrier = big & ~cand
         barrier[0] = False
         self.barrier = barrier
         barrier_mask = barrier.astype(np.uint8)[self.labels]
@@ -325,6 +334,7 @@ class _Scan:
             while d <= limit:
                 px, py = int(cx + dx * d), int(cy + dy * d)
                 if not (0 <= px < self.W and 0 <= py < self.H):
+                    hit = "edge"  # край картинки — тоже граница (стрип бывает обрезан по рамке)
                     break
                 if walls[py, px]:
                     hit = (px, py)
@@ -332,6 +342,8 @@ class _Scan:
                 d += 1.5
             if hit is None:
                 far += 1
+                continue
+            if hit == "edge":
                 continue
             px, py = hit
             win = self.labels[max(0, py - 2):py + 3, max(0, px - 2):px + 3]
@@ -370,8 +382,10 @@ class _Scan:
             rx, ry, rw, rh, _ = rstats[p.region]
             if top_left(p) and p.region in logo:
                 p.kind = "logo"
-            elif p.rel < MIN_REL:
+            elif p.rel < MIN_REL or self._is_face(p):
                 p.kind = "tiny"
+            elif enclosed and self._low_in_panel(p) and not any(self._has_hole(i) for i in p.members):
+                p.kind = "tiny"  # трава, подпись, дата внизу кадра
             elif enclosed:
                 p.kind = "bubble"
             elif not p.region or rx == 0 or ry == 0 or rx + rw >= self.W or ry + rh >= self.H:
@@ -383,8 +397,34 @@ class _Scan:
                 p.kind = "sound"
         self._merge_bubble_pieces(places)
 
+    def _is_face(self, p) -> bool:
+        """Лицо «(•C•)»: несколько значков, и больше половины из них — тонкие скобки."""
+        thin = sum(self.stats[i, 2] < 0.35 * self.stats[i, 3] for i in p.members)
+        return len(p.members) <= 5 and thin * 2 > len(p.members)
+
+    def _has_hole(self, i) -> bool:
+        """Есть ли у буквы «дырка», как у A, B, D, O, P, R."""
+        x, y, w, h = self.stats[i, :4]
+        inside = np.pad((self.labels[y:y + h, x:x + w] != i).astype(np.uint8), 1, constant_values=1)
+        n, lab, st, _ = cv2.connectedComponentsWithStats(inside, connectivity=4)
+        return any(st[k, 4] >= 4 for k in range(1, n) if k != lab[0, 0])
+
+    def _low_in_panel(self, p) -> bool:
+        """Центр Надписи в нижней части кадра (кадр — самая маленькая рамка вокруг неё)."""
+        x0, y0, x1, y1 = p.letters
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        st = self.stats
+        frames = [i for i in np.nonzero(self.barrier)[0]
+                  if st[i, 3] >= 0.2 * self.H and st[i, 2] >= 0.08 * self.W
+                  and st[i, 0] <= cx <= st[i, 0] + st[i, 2] and st[i, 1] <= cy <= st[i, 1] + st[i, 3]]
+        if not frames:
+            return False
+        frame = min(frames, key=lambda i: st[i, 2] * st[i, 3])
+        return (cy - st[frame, 1]) / st[frame, 3] > LOW_IN_PANEL
+
     def _merge_bubble_pieces(self, places) -> None:
-        """Куски одного Бабла (буквы посередине слиплись с контуром): одна область, одна строка."""
+        """Куски одного Бабла (буквы посередине слиплись с контуром): одна область, одна строка,
+        и между ними нет контура — иначе это два соседних Бабла."""
         bubbles = [p for p in places if p.kind == "bubble"]
         merged = True
         while merged:
@@ -397,11 +437,22 @@ class _Scan:
                     bx0, by0, bx1, by1 = b.letters
                     overlap = min(ay1, by1) - max(ay0, by0)
                     gap = max(bx0 - ax1, ax0 - bx1)
-                    if overlap > 0.5 * min(ay1 - ay0, by1 - by0) and gap < 6 * max(a.height, b.height):
+                    if (overlap > 0.5 * min(ay1 - ay0, by1 - by0) and gap < 6 * max(a.height, b.height)
+                            and not self._outline_between(a, b)):
                         a.letters = (min(ax0, bx0), min(ay0, by0), max(ax1, bx1), max(ay1, by1))
                         a.members = a.members + b.members
                         b.kind = "merged"
                         merged = True
+
+    def _outline_between(self, a, b) -> bool:
+        """Есть ли между двумя Надписями одной строки стенка выше строки (контур Бабла)."""
+        (ax0, ay0, ax1, ay1), (bx0, by0, bx1, by1) = sorted([a.letters, b.letters])
+        y0, y1 = max(ay0, by0), min(ay1, by1)
+        if bx0 <= ax1 or y1 <= y0:
+            return False
+        strip = self.labels[y0:y1, ax1:bx0]
+        walls = np.unique(strip[self.barrier[strip]])
+        return any(self.stats[i, 3] > 2.0 * max(a.height, b.height) for i in walls)
 
     # --------------------------------------------------------------- Очистка
 

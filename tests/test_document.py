@@ -107,7 +107,8 @@ def test_extra_lines_do_not_shift_each_other():
 
     bubbles = [Box(0, 0, 10, 10)]
     sounds = [SoundBox(100, 0, 10, 10, 0), SoundBox(200, 0, 10, 10, 0)]
-    placed = [box for _, box in assign_places(lines("- А\n- Б\nБАЦ!\nБУМ!\nХРЯСЬ!\n"), bubbles, sounds)]
+    placed = [box for _, box in assign_places(lines("- А\n- Б\nЗвуки:\n- БАЦ!\n- БУМ!\n- ХРЯСЬ!\n"),
+                                              bubbles, sounds)]
     assert placed[0] == bubbles[0]
     assert placed[1] == fallback(0)               # лишняя Реплика
     assert placed[2:4] == sounds                  # Звуки — на свои места
@@ -226,10 +227,36 @@ def test_loading_translation_onto_image_can_be_undone(doc):
     assert doc.blocks == []
 
 
-def test_new_translation_resets_pencil_edits(loaded):
+def test_new_translation_keeps_pencil_work(loaded):
     loaded.paint(50, 450, 80, 450, 12, BLACK)
-    loaded.set_translation(translation.read(DATA / "pe1963-04-08.txt"))
-    assert (loaded.image == loaded.analysis.cleaned).all()
+    painted = loaded.image.copy()
+    loaded.set_translation(lines("- Другая реплика\n"))
+    assert (loaded.image == painted).all()
+    loaded.undo()                                   # отмена возвращает и Перевод, и блоки
+    assert len(loaded.blocks) == 4 and len(loaded.lines) == 4
+    assert (loaded.image == painted).all()
+
+
+def test_sound_is_erased_only_under_a_translated_sound(doc):
+    """Найденный Звук стирается, только когда на него встаёт строка Перевода."""
+    doc.open_strip(strip("pe1963-04-14"))
+    assert len(doc.sounds) == 1
+    x, y, w, h = doc.sounds[0][:4]
+    english = doc.original[y:y + h, x:x + w]
+    assert (doc.image[y:y + h, x:x + w] == english).all()            # без Перевода — на месте
+    doc.set_translation(lines("- Реплика\nЗвуки:\n- БАЦ!\n"))
+    assert doc.erased_sounds == (0,)
+    assert (doc.image[y:y + h, x:x + w] != english).any()            # под переведённым — стёрт
+    doc.set_translation(lines("- Реплика\n"))
+    assert doc.erased_sounds == () and (doc.image[y:y + h, x:x + w] == english).all()
+
+
+def test_fallback_row_wraps_inside_the_strip():
+    from rus_peanuts.typesetting.document import assign_places
+
+    boxes = [b for _, b in assign_places(lines("".join(f"- {i}\n" for i in range(15))), [], [], width=2229)]
+    assert max(b.x + b.w for b in boxes) <= 2229
+    assert boxes[0] == fallback(0) and boxes[-1].y > boxes[0].y
 
 
 def test_new_strip_starts_history_over_and_keeps_translation(loaded):

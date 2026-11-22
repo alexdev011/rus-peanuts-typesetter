@@ -304,11 +304,28 @@ def test_right_button_erases_white_without_pencil(shown):
     assert (ts.doc.image[440, 300:321] == 255).all()
 
 
-def test_escape_turns_pencil_off(loaded):
+def test_cursor_button_and_escape_turn_pencil_off(loaded):
     win = loaded.win
+    assert win.btn_cursor.isChecked() and not win.btn_cursor.icon().isNull()
+    win.btn_pencil.click()
+    assert win.view.pencil and not win.btn_cursor.isChecked()
+    win.btn_cursor.click()
+    assert not win.btn_pencil.isChecked() and not win.view.pencil and win.view.isInteractive()
     win.btn_pencil.click()
     QTest.keyClick(win, Qt.Key.Key_Escape)
-    assert not win.btn_pencil.isChecked() and not win.view.pencil and win.view.isInteractive()
+    assert win.btn_cursor.isChecked() and not win.view.pencil
+
+
+def test_pencil_survives_loading_a_translation(shown, tmp_path):
+    ts, win = shown, shown.win
+    win.btn_black.click()
+    win.spin_brush.setValue(10)
+    win.view.centerOn(300, 440)
+    drag(win.view, Qt.MouseButton.LeftButton, [(250, 440), (350, 440)])
+    txt = tmp_path / "t.txt"
+    txt.write_text("- Новая реплика\n", encoding="utf-8")
+    ts.load_txt(txt)
+    assert (ts.doc.image[436:445, 250:351] == 0).all()
 
 
 def test_no_painting_while_original_is_shown(loaded):

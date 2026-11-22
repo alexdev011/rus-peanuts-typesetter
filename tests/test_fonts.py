@@ -27,6 +27,16 @@ def test_each_font_has_its_own_qt_family(library):
     assert len(set(families)) == len(families)
 
 
+def test_qt_family_names_are_neutral(library):
+    """Windows отрезает от имени семейства слова вроде «-Bold»: MP Manga Bold и MP Manga Bold Shadow
+    сливались в одно семейство, и Shadow рисовался сплошным. Имена семейств не должны быть
+    продолжением друг друга и не должны содержать названий начертаний."""
+    families = [f.family for f in library.faces]
+    for a in families:
+        assert not any(w in a.lower() for w in ("bold", "italic", "regular", "light", "black", "shadow"))
+        assert not any(b != a and b.startswith(a) for b in families)
+
+
 def test_unknown_font_is_shown_with_the_reply_font(library):
     assert library.default == DEFAULT_FONT
     assert library.family("TroubleSide") == library.get(DEFAULT_FONT).family

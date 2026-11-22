@@ -64,7 +64,9 @@ class FontLibrary:
         postscript = postscript_name(raw) or stem
         if postscript in self._faces:
             return self._faces[postscript]
-        family = "RusPeanuts_" + "".join(ch for ch in postscript if ch.isalnum() or ch in "-_")
+        # Нейтральное имя семейства: без слов вроде Bold и без общего начала с другими. Иначе
+        # Windows отрезает «-Bold» и сводит MP Manga Bold и MP Manga Bold Shadow в одно семейство.
+        family = f"RusPeanutsFace{len(self._faces) + 1:03d}"
         fid = QFontDatabase.addApplicationFontFromData(QByteArray(rename_ttf_family(raw, family)))
         families = QFontDatabase.applicationFontFamilies(fid) if fid != -1 else []
         if not families:

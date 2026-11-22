@@ -69,10 +69,41 @@ def test_file_layout_is_readable_zip(edited, tmp_path):
     path = tmp_path / "p.rpeanuts"
     project.save(edited, path)
     with zipfile.ZipFile(path) as z:
-        assert set(z.namelist()) == {"project.json", "original.png", "cleaned.png", "image.png"}
+        assert set(z.namelist()) == {"project.json", "original.png", "cleaned.png", "sound_erase.png",
+                                     "pencil.png", "image.png"}
         meta = json.loads(z.read("project.json"))
-    assert (meta["format"], meta["version"]) == ("rus-peanuts-project", 2)
+    assert (meta["format"], meta["version"]) == ("rus-peanuts-project", 3)
     assert [b["font"] for b in meta["blocks"]].count("MPMangaFontBold") == 1
+
+
+def test_reopened_project_keeps_pencil_when_retranslated(edited, typography, tmp_path):
+    path = tmp_path / "p.rpeanuts"
+    project.save(edited, path)
+    restored = project.load(path, typography)
+    painted = restored.image.copy()
+    restored.set_translation(translation.parse("- Новая реплика\n"))
+    assert (restored.image[95:125, 90:150] == painted[95:125, 90:150]).all()   # штрих Карандаша на месте
+
+
+def test_version_2_project_keeps_its_pencil_strokes(edited, typography, tmp_path):
+    """Проект версии 2: Карандаш был нарисован прямо по картинке — он становится слоем Карандаша."""
+    src, dst = tmp_path / "v3.rpeanuts", tmp_path / "v2.rpeanuts"
+    project.save(edited, src)
+    with zipfile.ZipFile(src) as zin, zipfile.ZipFile(dst, "w") as zout:
+        for name in zin.namelist():
+            if name in ("pencil.png", "sound_erase.png"):
+                continue
+            data = zin.read(name)
+            if name == "project.json":
+                meta = json.loads(data)
+                meta["version"] = 2
+                del meta["erased_sounds"]
+                data = json.dumps(meta).encode()
+            zout.writestr(name, data)
+    restored = project.load(dst, typography)
+    assert (restored.image == edited.image).all()
+    restored.set_translation(translation.parse("- Новая реплика\n"))
+    assert (restored.image[95:125, 90:150] == edited.image[95:125, 90:150]).all()   # штрих пережил новый Перевод
 
 
 def test_version_1_project_gets_fonts_from_shadow_flag(edited, typography, tmp_path):

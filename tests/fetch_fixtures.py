@@ -23,6 +23,8 @@ PAGES = {
     "page_100.png": "page_100.png",
     "page_102.png": "page_102.png",
     "page_101.png": "wpage_101.png",  # 'w' в начале имени = воскресная Страница
+    "page_103.png": "page_103.png",    # два соседних Бабла, которые нельзя склеивать
+    "page_72.png": "page_72.png",
 }
 PSD_TRANSLATION = "pe1963-04-13"
 

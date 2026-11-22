@@ -31,6 +31,7 @@ def test_analysis_matches_golden(golden, folder, name):
         "bubbles": [list(b) for b in result.bubbles],
         "sounds": [list(s) for s in result.sounds],  # x, y, w, h, Изгиб
         "cleaned": g.image("cleaned", result.cleaned),
+        "sound_erase": g.image("sound_erase", result.sound_erase),
     })
 
 
@@ -78,6 +79,29 @@ def test_sounds_on_the_drawing():
     assert len(result.sounds) == 1 and overlaps(result.sounds[0], 1290, 1590, 1500, 1650)  # SMACK!
     places = result.bubbles + result.sounds
     assert not any(overlaps(b, 1287, 1012, 1390, 1075) for b in places)    # POW!
+
+
+def test_neighbouring_bubbles_are_not_glued():
+    """Два соседних Бабла в одной строке — два места, а не одно (между ними контуры)."""
+    bubbles = analyze(fixture_path("pages", "page_103.png")).bubbles
+    assert sum(overlaps(b, 135, 213, 633, 363) for b in bubbles) == 2
+    bubbles = analyze(fixture_path("pages", "page_72.png")).bubbles
+    assert sum(overlaps(b, 1850, 768, 2314, 883) for b in bubbles) == 2
+
+
+def test_strip_cut_at_the_frame_keeps_its_bubbles():
+    """Стрип обрезан прямо по рамке, текст у самого края — Баблы всё равно находятся целиком."""
+    img = analysis.load_image(fixture_path("strips", "pe1963-04-08.png"))
+    full = analysis.analyze(img).bubbles
+    cut = analysis.analyze(img[30:].copy()).bubbles
+    assert [(x, y - 30, w, h) for x, y, w, h in full] == [tuple(b) for b in cut]
+
+
+def test_sounds_are_not_erased_until_translated():
+    result = analyze(fixture_path("pages", "page_102.png"))
+    x, y, w, h = result.sounds[0][:4]
+    assert (result.cleaned[y:y + h, x:x + w] == result.original[y:y + h, x:x + w]).all()
+    assert (result.cleaned_with([0])[y:y + h, x:x + w] != result.original[y:y + h, x:x + w]).any()
 
 
 def test_logo_signature_dates_and_page_captions_are_not_places():

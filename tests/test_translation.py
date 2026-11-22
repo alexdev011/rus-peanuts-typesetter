@@ -1,6 +1,7 @@
 """Разбор Перевода (.txt): какие строки становятся Репликами, какие Звуками, какие пропускаются.
 
-Правило: сначала Реплики (с тире), в конце файла — Звуки (без тире)."""
+Правило: сначала Реплики, потом строка «Звуки:» и Звуки; у всех строк тире.
+Без «Звуки:» — старое правило: Звуки — строки без тире в конце файла."""
 from rus_peanuts.typesetting import translation
 
 
@@ -14,7 +15,38 @@ def write(tmp_path, text, encoding="utf-8"):
     return p
 
 
-def test_sounds_are_the_lines_without_dash_at_the_end():
+def test_sounds_go_after_the_sounds_line():
+    assert parsed("- Привет, Чарли Браун!\n- Как дела?\nЗвуки:\n- БАЦ!\n- ХАХАХА!\n") == [
+        ("Привет, Чарли Браун!", True),
+        ("Как дела?", True),
+        ("БАЦ!", False),
+        ("ХАХАХА!", False),
+    ]
+
+
+def test_sounds_line_ignores_case_spaces_and_colon():
+    for marker in ("ЗВУКИ", "звуки:", "  Звуки :  ", "Звуки"):
+        assert parsed(f"- А\n{marker}\n- БАЦ!\n") == [("А", True), ("БАЦ!", False)], marker
+
+
+def test_dash_ignores_spaces_and_any_dash_works():
+    """Пробелы вокруг тире не важны; длинное тире (Word меняет «-» сам) — тоже тире."""
+    assert parsed("-Привет\n-   Как дела?\n   - Пока\n– Ага\n— Угу\n") == [
+        ("Привет", True), ("Как дела?", True), ("Пока", True), ("Ага", True), ("Угу", True),
+    ]
+
+
+def test_dash_alone_is_skipped():
+    assert parsed("- Привет!\n-\n- Пока!\n") == [("Привет!", True), ("Пока!", True)]
+
+
+def test_utf8_with_bom_is_read(tmp_path):
+    """Блокнот сохраняет UTF-8 с невидимой меткой BOM в начале — первая строка не должна её получить."""
+    lines = translation.read(write(tmp_path, "\ufeff- Привет!\n- Пока!\n"))
+    assert [(ln.text, ln.is_reply, ln.dash) for ln in lines] == [("Привет!", True, True), ("Пока!", True, True)]
+
+
+def test_old_files_sounds_are_the_lines_without_dash_at_the_end():
     assert parsed("- Привет, Чарли Браун!\n- Как дела?\nБАЦ!\nХАХАХА!\n") == [
         ("Привет, Чарли Браун!", True),
         ("Как дела?", True),
@@ -47,12 +79,6 @@ def test_dates_footnotes_comments_and_blank_lines_are_skipped():
         "1963-04-09 строка, начинающаяся с даты, тоже пропадает\n"
         "- Пока!\n"
     ) == [("Привет!", True), ("Пока!", True)]
-
-
-def test_em_dash_is_NOT_a_reply():
-    """ХАРАКТЕРИЗАЦИЯ: только ASCII-дефис делает строку Репликой.
-    Строка с длинным тире «— Привет!» (как принято в русском тексте) становится Звуком."""
-    assert parsed("— Привет!\n") == [("— Привет!", False)]
 
 
 def test_all_leading_dashes_and_spaces_are_stripped():

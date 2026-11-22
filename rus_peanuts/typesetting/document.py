@@ -17,9 +17,10 @@ from .translation import Line
 
 HISTORY_LIMIT = 40
 
-# Цвета Карандаша (BGR, как картинка стрипа)
+# Цвета Карандаша (BGR, как картинка стрипа) и как они хранятся в слое Карандаша
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
+_PENCIL_CODE = {WHITE: 1, BLACK: 2}
 
 # Запасной ряд мест вверху стрипа для строк, которым не нашлось места
 FALLBACK_X, FALLBACK_STEP, FALLBACK_Y, FALLBACK_W, FALLBACK_H = 80, 180, 45, 160, 70
@@ -63,12 +64,14 @@ class TextBlock:
         self.text = hyphenate_text(text) if self.is_reply else text
 
 
-def assign_places(lines: list[Line], bubbles: list[Box], sounds: list[SoundBox]):
+def assign_places(lines: list[Line], bubbles: list[Box], sounds: list[SoundBox], width: int | None = None):
     """Сопоставляет строки Перевода местам на стрипе по Порядку чтения.
 
     N-я Реплика идёт в N-й Бабл, N-й Звук — в N-е место Звука. Строки без места
-    встают в запасной ряд вверху стрипа и не сдвигают остальные.
+    встают в запасной ряд вверху стрипа и не сдвигают остальные; если ряд не влезает
+    в ширину стрипа `width`, он продолжается ниже.
     """
+    per_row = max(1, (width - FALLBACK_X) // FALLBACK_STEP) if width else 10 ** 6
     bubble_idx = sound_idx = spare = 0
     for line in lines:
         if line.is_reply and bubble_idx < len(bubbles):
@@ -78,17 +81,24 @@ def assign_places(lines: list[Line], bubbles: list[Box], sounds: list[SoundBox])
             box = sounds[sound_idx]
             sound_idx += 1
         else:
-            box = Box(FALLBACK_X + spare * FALLBACK_STEP, FALLBACK_Y, FALLBACK_W, FALLBACK_H)
+            col, row = spare % per_row, spare // per_row
+            box = Box(FALLBACK_X + col * FALLBACK_STEP, FALLBACK_Y + row * (FALLBACK_H + 20), FALLBACK_W, FALLBACK_H)
             spare += 1
         yield line, box
 
 
 class Document:
+    """Картинка под текстом (`image`) собирается из трёх слоёв: Оригинал с Очисткой Баблов,
+    стёртые Звуки, на которые встал Перевод, и слой Карандаша поверх. Поэтому новый
+    Перевод не стирает работу Карандашом."""
+
     def __init__(self, typography):
         self.typography = typography
         self.analysis: StripAnalysis | None = None
         self.lines: list[Line] | None = None
-        self.image: np.ndarray | None = None      # очищенный стрип с правками Карандашом
+        self.image: np.ndarray | None = None      # то, что видно под текстом
+        self.pencil: np.ndarray | None = None     # слой Карандаша: 0 — нет, 1 — белый, 2 — чёрный
+        self.erased_sounds: tuple = ()            # номера Звуков, стёртых под строками Перевода
         self.blocks: list[TextBlock] = []
         self._history: list = []
 
@@ -111,23 +121,36 @@ class Document:
     def open_strip(self, image: np.ndarray, lines: list[Line] | None = None) -> None:
         """Новый стрип: анализ, Очистка и расстановка Перевода. История начинается заново."""
         self.analysis = _analysis.analyze(image)
+        self.pencil = np.zeros(image.shape[:2], np.uint8)
         if lines is not None:
             self.lines = lines
         self._history.clear()
         self._place()
 
     def set_translation(self, lines: list[Line]) -> None:
-        """Новый Перевод: Текстовые блоки расставляются заново (это можно отменить)."""
+        """Новый Перевод: Текстовые блоки расставляются заново (это можно отменить).
+        Работа Карандашом остаётся."""
         if self.image is not None:
             self.checkpoint()
         self.lines = lines
         self._place()
 
     def _place(self) -> None:
-        if self.analysis is not None:
-            self.image = self.analysis.cleaned.copy()  # правки Карандашом сбрасываются
-        self.blocks = [self.typography.fit(line, box)
-                       for line, box in assign_places(self.lines or [], self.bubbles, self.sounds)]
+        width = self.analysis.original.shape[1] if self.analysis is not None else None
+        placed = list(assign_places(self.lines or [], self.bubbles, self.sounds, width))
+        self.blocks = [self.typography.fit(line, box) for line, box in placed]
+        self.erased_sounds = tuple(k for k, s in enumerate(self.sounds) if any(box is s for _, box in placed))
+        self._render()
+
+    def _render(self) -> None:
+        """Собирает картинку под текстом: Очистка, стёртые Звуки, Карандаш."""
+        if self.analysis is None:
+            self.image = None
+            return
+        self.image = self.analysis.cleaned_with(self.erased_sounds)
+        if self.pencil is not None:
+            self.image[self.pencil == 1] = WHITE
+            self.image[self.pencil == 2] = BLACK
 
     # ---------------------------------------------------------------- правки
 
@@ -141,17 +164,18 @@ class Document:
         Цвет — WHITE или BLACK. Края без сглаживания, как у карандаша Фотошопа.
         False — стрипа нет или кисть не достаёт до картинки.
         """
-        if self.image is None:
+        if self.image is None or self.pencil is None:
             return False
         h, w = self.image.shape[:2]
         r = max(0, int(radius))
         if max(x0, x1) < -r or min(x0, x1) >= w + r or max(y0, y1) < -r or min(y0, y1) >= h + r:
             return False
         color = tuple(int(c) for c in color)
-        cv2.circle(self.image, (x0, y0), r, color, -1)
-        if (x0, y0) != (x1, y1):
-            cv2.line(self.image, (x0, y0), (x1, y1), color, 2 * r + 1)
-            cv2.circle(self.image, (x1, y1), r, color, -1)
+        for layer, value in ((self.image, color), (self.pencil, _PENCIL_CODE[color])):
+            cv2.circle(layer, (x0, y0), r, value, -1)
+            if (x0, y0) != (x1, y1):
+                cv2.line(layer, (x0, y0), (x1, y1), value, 2 * r + 1)
+                cv2.circle(layer, (x1, y1), r, value, -1)
         return True
 
     # --------------------------------------------------------------- отмена
@@ -160,7 +184,8 @@ class Document:
         """Запоминает состояние перед правкой. `selected` — индексы выделенных блоков."""
         if self.image is None:
             return
-        self._history.append((self.image.copy(), copy.deepcopy(self.blocks), tuple(selected)))
+        self._history.append((self.pencil.copy(), copy.deepcopy(self.blocks), self.lines, self.erased_sounds,
+                              tuple(selected)))
         if len(self._history) > HISTORY_LIMIT:
             self._history.pop(0)
 
@@ -182,5 +207,6 @@ class Document:
         выделены, или None, если отменять нечего."""
         if not self._history:
             return None
-        self.image, self.blocks, selected = self._history.pop()
+        self.pencil, self.blocks, self.lines, self.erased_sounds, selected = self._history.pop()
+        self._render()
         return list(selected)
