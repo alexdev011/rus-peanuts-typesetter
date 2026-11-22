@@ -1,16 +1,44 @@
-"""Анализ стрипа: поиск Баблов и Звуков на Оригинале и Очистка английского текста.
+"""Анализ стрипа: поиск Надписей на Оригинале, места Реплик и Звуков, Очистка.
 
-Классическое компьютерное зрение без нейросетей: связные области тёмных пикселей
-делятся на «барьеры» (рамки, рисунок) и кандидаты в буквы; буквы, у которых есть
-соседи того же размера, собираются в группы — места Реплик и Звуков.
+Классическое компьютерное зрение без нейросетей, один проход для любых надписей —
+от мелких букв реплик до крупных букв звуков:
 
-Все пороги заданы в пикселях и подобраны под сканы определённого разрешения.
+1. Связные области тёмных пикселей. Кандидат в буквы — область размером с букву
+   на светлом фоне; остальное крупное — «стенки»: рамки кадров, контуры Баблов, рисунок.
+2. Буква подтверждается соседями той же высоты в той же строке.
+3. Соседние буквы похожего размера, между которыми нет стенки, собираются в Надпись.
+   В Надписи должны быть хотя бы три буквы подряд, как в слове.
+4. Где стоит Надпись: из её центра пускаются лучи. Если почти все упираются в линию
+   рядом — Надпись в Бабле (место Реплики), иначе — на рисунке (место Звука).
+   Крупные буквы без общего контура вокруг — тоже Звук, даже если рядом тесно.
+5. Не места: логотип PEANUTS (крупные буквы в прямоугольной рамке), подписи под
+   стрипами (белое поле до края картинки), мелкие пометки рисунка — лица, трава,
+   подпись SCHULZ, дата (их буквы заметно мельче обычных букв реплик).
+
+Пороги в пикселях подобраны под сканы шириной ~2200 px.
 """
+import math
 from dataclasses import dataclass
 from typing import NamedTuple
 
 import cv2
 import numpy as np
+
+DARK, LIGHT = 200, 210          # тёмное — буквы и линии, светлое — фон
+LETTER_H = (7, 140)             # высота буквы, px
+SMALL_MAX = 42                  # до этой высоты — буквы реплик, выше — крупные буквы
+SURROUND = 0.72                 # доля светлого вокруг кандидата в буквы
+MIN_WORD = 3                    # букв подряд в Надписи
+RAYS = 32
+FAR_MARGIN = 2.5                # луч не встретил линию за столько высот букв — открытое место
+FAR_SHARE = 0.2                 # столько лучей может уйти в открытое место у Надписи в Бабле
+BIG_LETTERS = 1.25              # крупные буквы — во столько раз выше обычных букв реплик
+LOOSE_HUG = 0.75                # у Бабла общий контур ловит хотя бы столько лучей
+MIN_REL = 0.7                   # буквы мельче этой доли обычных — пометки рисунка
+SOUND_MIN_REL = 0.75            # то же для Надписи на рисунке: там пометок больше (лица, трава)
+WATERMARK = (28, 0.35)          # надпись группы вверху слева на готовых стрипах: высота, доля ширины
+BUBBLE_PAD = (6, 5, 14, 5)      # поля места Реплики вокруг букв: слева, сверху, справа, снизу
+SOUND_PAD = (8, 8, 16, 8)
 
 
 class Box(NamedTuple):
@@ -45,9 +73,21 @@ def load_image(path) -> np.ndarray | None:
 
 
 def analyze(img: np.ndarray) -> StripAnalysis:
-    erase_mask, bubbles, sounds = _detect(img)
-    cleaned = _clean(img, erase_mask, list(bubbles) + list(sounds))
-    return StripAnalysis(original=img, bubbles=bubbles, sounds=sounds, cleaned=cleaned)
+    scan = _Scan(img)
+    places = scan.lettering()
+    bubbles = [p for p in places if p.kind == "bubble"]
+    sounds = [p for p in places if p.kind == "sound"]
+    H = img.shape[0]
+    bubble_boxes = [Box(*p.padded(BUBBLE_PAD, scan.W, scan.H)) for p in bubbles]
+    sound_boxes = [SoundBox(*p.padded(SOUND_PAD, scan.W, scan.H), scan.arch(p)) for p in sounds]
+    erase_mask = scan.erase_mask(bubble_boxes + [b[:4] for b in sound_boxes])
+    cleaned = _clean(img, erase_mask, bubble_boxes + sound_boxes)
+    return StripAnalysis(
+        original=img,
+        bubbles=_sort_reading_order(bubble_boxes, H),
+        sounds=_sort_reading_order(sound_boxes, H),
+        cleaned=cleaned,
+    )
 
 
 def _clean(orig_img, erase_mask, boxes):
@@ -62,228 +102,336 @@ def _clean(orig_img, erase_mask, boxes):
 
 
 def _sort_reading_order(box_list, H):
-    box_list.sort(key=lambda b: b[1])
+    box_list = sorted(box_list, key=lambda b: b[1])
     rows = []
     row_thresh = max(70, min(150, int(H * 0.18)))
     for b in box_list:
-        placed = False
         for r in rows:
-            avg_y = np.mean([item[1] for item in r])
-            if abs(b[1] - avg_y) < row_thresh:
+            if abs(b[1] - np.mean([item[1] for item in r])) < row_thresh:
                 r.append(b)
-                placed = True
                 break
-        if not placed:
+        else:
             rows.append([b])
     res = []
     for r in rows:
-        r.sort(key=lambda b: b[0])
-        res.extend(r)
+        res.extend(sorted(r, key=lambda b: b[0]))
     return res
 
 
-def _detect(img):
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    H, W = gray.shape
+@dataclass
+class _Lettering:
+    """Надпись: буквы (номера связных областей) и где она стоит."""
+    members: list
+    height: float                 # высота букв самого длинного слова
+    letters: tuple                # x0, y0, x1, y1 — границы букв
+    kind: str = ""                # bubble, sound, logo, margin, tiny
+    far: float = 0.0              # доля лучей, ушедших в открытое место
+    hug: float = 0.0              # доля лучей, упёршихся в общий контур вокруг Надписи
+    rel: float = 0.0              # высота букв относительно обычных букв реплик
+    region: int = 0               # белая область вокруг Надписи
 
-    _, dark_mask = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
-    _, white_mask = cv2.threshold(gray, 210, 255, cv2.THRESH_BINARY)
+    def padded(self, pad, W, H):
+        x0, y0, x1, y1 = self.letters
+        left, top, right, bottom = pad
+        x, y = max(0, x0 - left), max(0, y0 - top)
+        return int(x), int(y), int(min(W - x, x1 - x0 + left + right)), int(min(H - y, y1 - y0 + top + bottom))
 
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(dark_mask, connectivity=8)
 
-    barrier_ids = []
-    candidates = []
-    sfx_candidates = []
+class _Scan:
+    def __init__(self, img):
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        self.H, self.W = gray.shape
+        _, self.dark = cv2.threshold(gray, DARK, 255, cv2.THRESH_BINARY_INV)
+        _, light = cv2.threshold(gray, LIGHT, 1, cv2.THRESH_BINARY)
+        self.light = cv2.integral(light)
+        self.n, self.labels, self.stats, _ = cv2.connectedComponentsWithStats(self.dark, connectivity=8)
 
-    for i in range(1, num_labels):
-        x, y, w, h, area = stats[i]
+    # -------------------------------------------------------------- помощники
 
-        if y < 28 and x < W * 0.35:
-            barrier_ids.append(i)
-            continue
+    def light_share(self, x0, y0, x1, y1, own=0) -> float:
+        """Доля светлых пикселей в прямоугольнике (без `own` пикселей самой области)."""
+        x0, y0, x1, y1 = max(0, x0), max(0, y0), min(self.W, x1), min(self.H, y1)
+        L = self.light
+        count = int(L[y1, x1] - L[y0, x1] - L[y1, x0] + L[y0, x0])
+        return count / max(1, (x1 - x0) * (y1 - y0) - own)
 
-        if 30 <= h <= min(140, int(H * 0.25)) and 4 <= w <= h * 1.6 and area >= 35:
-            pad = 5
-            y1, y2 = max(0, y - pad), min(H, y + h + pad)
-            x1, x2 = max(0, x - pad), min(W, x + w + pad)
-            if np.mean(white_mask[y1:y2, x1:x2]) > 135:
-                sfx_candidates.append((i, x, y, w, h))
+    def region_at(self, x0, y0, x1, y1) -> int:
+        """Белая область (между стенками), которая занимает прямоугольник больше всех."""
+        sub = self.regions[y0:y1, x0:x1]
+        vals = sub[sub > 0]
+        return int(np.bincount(vals).argmax()) if len(vals) else 0
 
-        if w > 48 or h > 45 or area > 800:
-            barrier_ids.append(i)
-            continue
+    def crosses(self, mask, x0, y0, x1, y1) -> bool:
+        steps = int(max(abs(x1 - x0), abs(y1 - y0)) / 2) + 2
+        xs = np.clip(np.linspace(x0, x1, steps).astype(int), 0, self.W - 1)
+        ys = np.clip(np.linspace(y0, y1, steps).astype(int), 0, self.H - 1)
+        return bool(mask[ys, xs].any())
 
-        if 7 <= h <= 42 and 2 <= w <= h * 3.0 and area >= 8:
-            pad = 4
-            y1, y2 = max(0, y - pad), min(H, y + h + pad)
-            x1, x2 = max(0, x - pad), min(W, x + w + pad)
-            if np.mean(white_mask[y1:y2, x1:x2]) > 160:
-                candidates.append((i, x, y, w, h))
+    # ------------------------------------------------------------ поиск букв
 
-    barrier_lut = np.zeros(num_labels, dtype=np.uint8)
-    barrier_lut[barrier_ids] = 255
-    barrier_mask = barrier_lut[labels]
+    def lettering(self) -> list[_Lettering]:
+        stats, n = self.stats, self.n
+        x, y, w, h, area = (stats[:, k] for k in range(5))
+        watermark = (y < WATERMARK[0]) & (x < self.W * WATERMARK[1])
+        watermark[0] = False
+        big = (w > 48) | (h > 45) | (area > 800)
+        small = h <= SMALL_MAX
+        h_max = min(LETTER_H[1], int(self.H * 0.25))
+        shape_ok = ((h >= LETTER_H[0]) & (h <= h_max) & (w >= 2) & (w <= h * np.where(small, 5.0, 3.0))
+                    & (area >= np.where(small, 8, 35)) & ~watermark)
+        shape_ok[0] = False
+        cand = np.zeros(n, bool)
+        for i in np.nonzero(shape_ok)[0]:
+            pad = 4 if small[i] else 5
+            if self.light_share(x[i] - pad, y[i] - pad, x[i] + w[i] + pad, y[i] + h[i] + pad, area[i]) > SURROUND:
+                cand[i] = True
 
-    verified_letters = []
+        barrier = watermark | (big & ~cand)
+        barrier[0] = False
+        self.barrier = barrier
+        barrier_mask = barrier.astype(np.uint8)[self.labels]
 
-    for (idx_i, x, y, w, h) in candidates:
-        cy = y + h / 2.0
-        neighbors = 0
-        for (idx_j, nx, ny, nw, nh) in candidates:
-            if idx_i == idx_j:
+        verified = self._verify(np.nonzero(cand)[0], barrier_mask)
+        small_h = [h[i] for i in verified if small[i]]
+        med_small = float(np.median(small_h)) if small_h else 25.0
+
+        # крупное, что не подтвердилось как буква, — рисунок, то есть стенка
+        barrier |= big & cand & ~np.isin(np.arange(n), list(verified))
+        self.barrier = barrier
+        self.barrier_mask = barrier.astype(np.uint8)[self.labels]
+        self.thick = cv2.dilate(self.barrier_mask, np.ones((3, 3), np.uint8))
+
+        letters = self._with_neighbours(verified, np.nonzero(cand & ~big)[0])
+        places = [p for p in (self._place(g) for g in self._group(letters)) if p]
+        self._classify(places, med_small)
+        return [p for p in places if p.kind != "merged"]
+
+    def _verify(self, ids, barrier_mask) -> set:
+        """Буквы, у которых есть хотя бы два соседа той же высоты в той же строке."""
+        st = self.stats[ids].astype(float)
+        bx, by, bw, bh = st[:, 0], st[:, 1], st[:, 2], st[:, 3]
+        cy = by + bh / 2
+        verified = set()
+        for a in range(len(ids)):
+            ha = bh[a]
+            gap = np.maximum(0, np.maximum(bx - (bx[a] + bw[a]), bx[a] - (bx + bw)))
+            near = ((np.abs(cy - cy[a]) < 0.6 * ha) & (np.abs(bh - ha) <= max(4, 0.3 * ha))
+                    & (gap < ha * (2.5 if ha <= SMALL_MAX else 1.5)))
+            near[a] = False
+            js = np.nonzero(near)[0]
+            if len(js) < 2:
                 continue
-            ncy = ny + nh / 2.0
-            if abs(cy - ncy) < h * 0.60 and abs(h - nh) <= max(4, h * 0.28):
-                dist_x = max(0, max(x - (nx + nw), nx - (x + w)))
-                if dist_x < h * 2.5:
-                    mid_x = int(((x + w / 2) + (nx + nw / 2)) / 2)
-                    mid_y = int((cy + ncy) / 2)
-                    if barrier_mask[mid_y, mid_x] == 0:
-                        neighbors += 1
-        if neighbors >= 2:
-            verified_letters.append((idx_i, x, y, w, h))
+            mx = ((bx[a] + bw[a] / 2 + bx[js] + bw[js] / 2) / 2).astype(int)
+            my = ((cy[a] + cy[js]) / 2).astype(int)
+            if np.count_nonzero(barrier_mask[my, mx] == 0) >= 2:
+                verified.add(int(ids[a]))
+        return verified
 
-    med_h = float(np.median([b[4] for b in verified_letters])) if verified_letters else 15.0
-
-    filtered_letters = []
-    filtered_ids = []
-    for b in verified_letters:
-        if med_h * 0.65 <= b[4] <= med_h * 1.45:
-            filtered_letters.append(b)
-            filtered_ids.append(b[0])
-
-    filtered_lut = np.zeros(num_labels, dtype=np.uint8)
-    filtered_lut[filtered_ids] = 255
-    filtered_mask = filtered_lut[labels]
-
-    near_filtered = cv2.dilate(filtered_mask, cv2.getStructuringElement(cv2.MORPH_RECT, (int(med_h * 2.2), int(med_h * 0.8))))
-    for (idx_i, x, y, w, h) in candidates:
-        if med_h * 0.55 <= h <= med_h * 1.45 and np.any(near_filtered[y:y + h, x:x + w] > 0):
-            if not np.any(barrier_mask[y:y + h, max(0, x - 12):x + w] > 0):
-                if (idx_i, x, y, w, h) not in filtered_letters:
-                    filtered_letters.append((idx_i, x, y, w, h))
-                    filtered_ids.append(idx_i)
-
-    filtered_lut = np.zeros(num_labels, dtype=np.uint8)
-    filtered_lut[filtered_ids] = 255
-    filtered_mask = filtered_lut[labels]
-
-    kw = max(16, int(med_h * 1.55))
-    kh = max(11, int(med_h * 1.15))
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kw, kh))
-    grouped = cv2.dilate(filtered_mask, kernel, iterations=1)
-
-    thick_barriers = cv2.dilate(barrier_mask, np.ones((3, 3), np.uint8), iterations=1)
-    grouped[thick_barriers > 0] = 0
-
-    contours, _ = cv2.findContours(grouped, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    valid_bubbles = []
-    for cnt in contours:
-        bx, by, bw, bh = cv2.boundingRect(cnt)
-        in_box = [
-            b for b in filtered_letters
-            if bx <= b[1] and (b[1] + b[3]) <= (bx + bw) and by <= b[2] and (b[2] + b[4]) <= (by + bh)
-        ]
-        if len(in_box) < 6 or bw < med_h * 2.5:
-            continue
-
-        roi_white = white_mask[by:by + bh, bx:bx + bw]
-        if np.mean(roi_white) < 170:
-            continue
-
-        min_x = min(b[1] for b in in_box)
-        min_y = min(b[2] for b in in_box)
-        max_x = max(b[1] + b[3] for b in in_box)
-        max_y = max(b[2] + b[4] for b in in_box)
-
-        pad_l, pad_r, pad_y = 6, 14, 5
-        rx = max(0, min_x - pad_l)
-        ry = max(0, min_y - pad_y)
-        rw = min(W - rx, (max_x - min_x) + pad_l + pad_r)
-        rh = min(H - ry, (max_y - min_y) + pad_y * 2)
-        valid_bubbles.append((rx, ry, rw, rh))
-
-    sfx_verified = []
-    sfx_ids = []
-    for (idx_i, x, y, w, h) in sfx_candidates:
-        if y < H * 0.45 and x < W * 0.45:
-            continue
-        cy = y + h / 2.0
-        neighbors = 0
-        for (idx_j, nx, ny, nw, nh) in sfx_candidates:
-            if idx_i == idx_j:
+    def _with_neighbours(self, verified, small_ids) -> set:
+        """Добавляет буквы без двух соседей (I, ?, !), стоящие вплотную к подтверждённым."""
+        stats = self.stats
+        near = np.zeros((self.H, self.W), np.uint8)
+        for i in verified:
+            x, y, w, h = stats[i, :4]
+            cv2.rectangle(near, (int(x - 1.1 * h), int(y - 0.4 * h)), (int(x + w + 1.1 * h), int(y + 1.4 * h)), 1, -1)
+        letters = set(verified)
+        for i in small_ids:
+            if i in letters:
                 continue
-            ncy = ny + nh / 2.0
-            if abs(cy - ncy) < h * 0.45 and abs(h - nh) <= h * 0.30:
-                dist_x = max(0, max(x - (nx + nw), nx - (x + w)))
-                if dist_x < h * 1.2:
-                    neighbors += 1
-        if neighbors >= 3:
-            sfx_verified.append((idx_i, x, y, w, h))
-            sfx_ids.append(idx_i)
+            x, y, w, h = stats[i, :4]
+            if near[y:y + h, x:x + w].any() and not self.barrier_mask[y:y + h, max(0, x - 12):x + w].any():
+                letters.add(int(i))
+        return letters
 
-    sfx_lut = np.zeros(num_labels, dtype=np.uint8)
-    sfx_lut[sfx_ids] = 255
-    sfx_mask = sfx_lut[labels]
+    def _group(self, letters) -> list[list]:
+        """Надписи: соседние буквы похожего размера, между которыми нет стенки."""
+        order = np.array(sorted(letters), dtype=int)
+        if not len(order):
+            return []
+        parent = list(range(len(order)))
 
-    sfx_boxes = []
-    if sfx_verified:
-        sfx_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (35, 20))
-        sfx_grouped = cv2.dilate(sfx_mask, sfx_kernel, iterations=1)
-        sfx_cnts, _ = cv2.findContours(sfx_grouped, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        for cnt in sfx_cnts:
-            sx, sy, sw, sh = cv2.boundingRect(cnt)
-            in_sfx = [b for b in sfx_verified if sx <= b[1] and (b[1] + b[3]) <= (sx + sw) and sy <= b[2] and (b[2] + b[4]) <= (sy + sh)]
-            if len(in_sfx) >= 4 and sw > 90:
-                sfx_boxes.append((max(0, sx - 6), max(0, sy - 6), min(W - sx, sw + 16), min(H - sy, sh + 14),
-                                  _read_arch(in_sfx)))
+        def find(a):
+            while parent[a] != a:
+                parent[a] = parent[parent[a]]
+                a = parent[a]
+            return a
 
-    erase_ids = []
-
-    for (bx, by, bw, bh) in valid_bubbles:
-        for i in range(1, num_labels):
-            if barrier_lut[i]:
-                continue
-            cx, cy, cw, ch, carea = stats[i]
-            if (cx >= bx - 4 and (cx + cw) <= (bx + bw + 6) and
-                    cy >= by - 4 and (cy + ch) <= (by + bh + 4)):
-                center_x = bx + bw // 2
-                center_y = by + bh // 2
-                line_check = np.zeros_like(barrier_mask)
-                cv2.line(line_check, (center_x, center_y), (cx + cw // 2, cy + ch // 2), 255, 1)
-                if np.any((line_check > 0) & (barrier_mask > 0)):
+        lx, ly, lw, lh = (self.stats[order, k].astype(float) for k in range(4))
+        for a in range(len(order)):
+            gap_x = np.maximum(0, np.maximum(lx - (lx[a] + lw[a]), lx[a] - (lx + lw)))
+            gap_y = np.maximum(0, np.maximum(ly - (ly[a] + lh[a]), ly[a] - (ly + lh)))
+            near = ((gap_x <= 0.78 * (lh + lh[a])) & (gap_y <= 0.58 * (lh + lh[a]))
+                    & (np.maximum(lh, lh[a]) <= 2.2 * np.minimum(lh, lh[a])))
+            near[:a + 1] = False
+            for b in np.nonzero(near)[0]:
+                if find(a) == find(b):
                     continue
-                if ch < 5:
-                    p = 4
-                    y1, y2 = max(0, cy - p), min(H, cy + ch + p)
-                    x1, x2 = max(0, cx - p), min(W, cx + cw + p)
-                    if np.mean(white_mask[y1:y2, x1:x2]) < 185:
+                if not self.crosses(self.thick, lx[a] + lw[a] / 2, ly[a] + lh[a] / 2, lx[b] + lw[b] / 2, ly[b] + lh[b] / 2):
+                    parent[find(a)] = find(b)
+        groups = {}
+        for k, i in enumerate(order):
+            groups.setdefault(find(k), []).append(int(i))
+        return list(groups.values())
+
+    def _word(self, members) -> list:
+        """Самая длинная цепочка букв подряд в одной строке: соседние, одной высоты, на одной линии."""
+        stats = self.stats
+        order = sorted(members, key=lambda i: stats[i, 0])
+        best = {i: [i] for i in order}
+        for a in order:
+            xa, ya, wa, ha = stats[a, :4]
+            for b in order:
+                xb, yb, wb, hb = stats[b, :4]
+                if xb <= xa:
+                    continue
+                hh = max(ha, hb)
+                gap = xb - (xa + wa)
+                if (-0.3 * hh <= gap < 0.9 * hh and abs(ha - hb) <= 0.3 * hh
+                        and abs((ya + ha) - (yb + hb)) <= 0.4 * hh and abs((ya + ha / 2) - (yb + hb / 2)) < 0.5 * hh
+                        and len(best[a]) + 1 > len(best[b])):
+                    best[b] = best[a] + [b]
+        return max(best.values(), key=len)
+
+    def _place(self, members) -> _Lettering | None:
+        stats = self.stats
+        if len(members) < MIN_WORD:
+            return None
+        word = self._word(members)
+        if len(word) < MIN_WORD:
+            return None
+        height = float(np.median([stats[i, 3] for i in word]))
+        x0 = min(stats[i, 0] for i in members)
+        y0 = min(stats[i, 1] for i in members)
+        x1 = max(stats[i, 0] + stats[i, 2] for i in members)
+        y1 = max(stats[i, 1] + stats[i, 3] for i in members)
+        if x1 - x0 < height * 2.5:
+            return None
+        return _Lettering(members=list(members), height=height, letters=(x0, y0, x1, y1))
+
+    # ------------------------------------------------------------ где стоит
+
+    def _rays(self, place, walls) -> None:
+        """Лучи из центра Надписи: сколько уходит в открытое место и сколько ловит общий контур."""
+        x0, y0, x1, y1 = place.letters
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        half_w, half_h = max(1.0, (x1 - x0) / 2 + 6), max(1.0, (y1 - y0) / 2 + 5)
+        far = hug = 0
+        for k in range(RAYS):
+            t = 2 * math.pi * k / RAYS
+            dx, dy = math.cos(t), math.sin(t)
+            d = min(half_w / abs(dx) if abs(dx) > 1e-9 else 1e9, half_h / abs(dy) if abs(dy) > 1e-9 else 1e9)
+            limit = d + FAR_MARGIN * place.height
+            hit = None
+            while d <= limit:
+                px, py = int(cx + dx * d), int(cy + dy * d)
+                if not (0 <= px < self.W and 0 <= py < self.H):
+                    break
+                if walls[py, px]:
+                    hit = (px, py)
+                    break
+                d += 1.5
+            if hit is None:
+                far += 1
+                continue
+            px, py = hit
+            win = self.labels[max(0, py - 2):py + 3, max(0, px - 2):px + 3]
+            found = win[self.barrier[win]]
+            if len(found):
+                lx, ly, lw, lh = self.stats[int(np.bincount(found).argmax()), :4]
+                if lx <= cx <= lx + lw and ly <= cy <= ly + lh:
+                    hug += 1
+        place.far, place.hug = far / RAYS, hug / RAYS
+
+    def _classify(self, places, med_small) -> None:
+        walls = self.thick
+        for p in places:
+            self._rays(p, walls)
+        sure = [p.height for p in places if p.far <= FAR_SHARE and len(p.members) >= 6]
+        ref_h = float(np.median(sure)) if sure else med_small
+        free = (walls == 0).astype(np.uint8)
+        _, self.regions, rstats, _ = cv2.connectedComponentsWithStats(free, connectivity=4)
+        for p in places:
+            p.rel = p.height / ref_h
+            p.region = self.region_at(*p.letters)
+
+        # логотип PEANUTS: крупные буквы в прямоугольной рамке в первом кадре
+        def top_left(p):
+            return p.letters[1] < self.H * 0.45 and p.letters[0] < self.W * 0.45
+
+        logo = set()
+        for p in places:
+            if top_left(p) and p.region and sum(self.stats[i, 3] > 2.2 * ref_h for i in p.members) >= 3:
+                rx, ry, rw, rh, rarea = rstats[p.region]
+                if rarea / float(rw * rh) > 0.85:
+                    logo.add(p.region)
+
+        for p in places:
+            enclosed = p.far <= FAR_SHARE and not (p.rel > BIG_LETTERS and p.hug < LOOSE_HUG)
+            rx, ry, rw, rh, _ = rstats[p.region]
+            if top_left(p) and p.region in logo:
+                p.kind = "logo"
+            elif p.rel < MIN_REL:
+                p.kind = "tiny"
+            elif enclosed:
+                p.kind = "bubble"
+            elif not p.region or rx == 0 or ry == 0 or rx + rw >= self.W or ry + rh >= self.H:
+                p.kind = "margin"
+            elif (p.rel < SOUND_MIN_REL or len(p.members) < 4
+                  or sum(self.stats[i, 2] >= 0.35 * self.stats[i, 3] for i in p.members) < 3):
+                p.kind = "tiny"
+            else:
+                p.kind = "sound"
+        self._merge_bubble_pieces(places)
+
+    def _merge_bubble_pieces(self, places) -> None:
+        """Куски одного Бабла (буквы посередине слиплись с контуром): одна область, одна строка."""
+        bubbles = [p for p in places if p.kind == "bubble"]
+        merged = True
+        while merged:
+            merged = False
+            for a in bubbles:
+                for b in bubbles:
+                    if a is b or a.kind != "bubble" or b.kind != "bubble" or a.region != b.region:
                         continue
-                erase_ids.append(i)
+                    ax0, ay0, ax1, ay1 = a.letters
+                    bx0, by0, bx1, by1 = b.letters
+                    overlap = min(ay1, by1) - max(ay0, by0)
+                    gap = max(bx0 - ax1, ax0 - bx1)
+                    if overlap > 0.5 * min(ay1 - ay0, by1 - by0) and gap < 6 * max(a.height, b.height):
+                        a.letters = (min(ax0, bx0), min(ay0, by0), max(ax1, bx1), max(ay1, by1))
+                        a.members = a.members + b.members
+                        b.kind = "merged"
+                        merged = True
 
-    for sfx_b in sfx_boxes:
-        sx, sy, sw, sh = sfx_b[0], sfx_b[1], sfx_b[2], sfx_b[3]
-        for i in range(1, num_labels):
-            cx, cy, cw, ch, carea = stats[i]
-            if cx >= sx and (cx + cw) <= (sx + sw) and cy >= sy and (cy + ch) <= (sy + sh):
-                if ch <= sh * 0.98 and cw <= sw * 0.45:
-                    erase_ids.append(i)
+    # --------------------------------------------------------------- Очистка
 
-    erase_lut = np.zeros(num_labels, dtype=np.uint8)
-    erase_lut[erase_ids] = 255
-    erase_mask = erase_lut[labels]
+    def erase_mask(self, boxes) -> np.ndarray:
+        """Что стереть: всё, кроме стенок, внутри мест и в той же белой области, что и место
+        (так за контуром Бабла ничего не стирается, даже если поле места за него заходит)."""
+        stats = self.stats
+        x, y, w, h = (stats[:, k] for k in range(4))
+        erase = np.zeros(self.n, bool)
+        for bx, by, bw, bh in boxes:
+            region = self.region_at(bx, by, bx + bw, by + bh)
+            inside = (~self.barrier & (x >= bx - 4) & (x + w <= bx + bw + 6) & (y >= by - 4) & (y + h <= by + bh + 4))
+            inside[0] = False
+            for i in np.nonzero(inside)[0]:
+                if self.region_at(x[i] - 2, y[i] - 2, x[i] + w[i] + 2, y[i] + h[i] + 2) != region:
+                    continue
+                if h[i] < 5 and self.light_share(x[i] - 4, y[i] - 4, x[i] + w[i] + 4, y[i] + h[i] + 4) < 185 / 255:
+                    continue  # точка в тёмном месте — скорее штриховка, чем знак препинания
+                erase[i] = True
+        return erase.astype(np.uint8)[self.labels] * 255
 
-    bubbles = [Box(*(int(v) for v in b)) for b in _sort_reading_order(valid_bubbles, H)]
-    sounds = [SoundBox(*(int(v) for v in b)) for b in _sort_reading_order(sfx_boxes, H)]
-    return erase_mask, bubbles, sounds
+    def arch(self, place) -> int:
+        return _read_arch([self.stats[i, :4] for i in place.members])
 
 
 def _read_arch(letters) -> int:
     """Изгиб Звука по центрам букв: парабола через них, коэффициент при x² (в пикселях)."""
     try:
-        pts_x = np.array([b[1] + b[3] / 2.0 for b in letters], dtype=np.float64)
-        pts_y = np.array([b[2] + b[4] / 2.0 for b in letters], dtype=np.float64)
+        pts_x = np.array([b[0] + b[2] / 2.0 for b in letters], dtype=np.float64)
+        pts_y = np.array([b[1] + b[3] / 2.0 for b in letters], dtype=np.float64)
         if len(pts_x) >= 3 and (pts_x.max() - pts_x.min()) > 30:
             mid_x = (pts_x.max() + pts_x.min()) / 2.0
             half_w = (pts_x.max() - pts_x.min()) / 2.0

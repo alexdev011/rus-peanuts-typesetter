@@ -5,7 +5,7 @@ from PyQt6.QtCore import QProcess, QRectF, Qt, QUrl
 from PyQt6.QtGui import QDesktopServices, QFont, QIcon, QKeySequence, QPainter, QShortcut
 from PyQt6.QtWidgets import (
     QButtonGroup, QComboBox, QFileDialog, QGraphicsScene, QHBoxLayout, QLabel, QMainWindow,
-    QMessageBox, QPushButton, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
+    QMessageBox, QPushButton, QSizePolicy, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from rus_peanuts.export import psd
@@ -130,6 +130,8 @@ class MainWindow(QMainWindow):
         tools.addSpacing(16)
         self.lbl_status = QLabel("Добро Пожаловать!")
         self.lbl_status.setStyleSheet("font-weight: bold; font-size: 12px;")
+        # длинное сообщение обрезается, а не раздвигает окно
+        self.lbl_status.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         tools.addWidget(self.lbl_status, stretch=1)
         ts_layout.addLayout(tools)
 
@@ -303,12 +305,15 @@ class MainWindow(QMainWindow):
         doc = self.document
         if doc.lines is None:
             self.lbl_status.setText(
-                f"Стрип очищен! Найдено баблов: {len(doc.bubbles)}, звуков/SFX: {len(doc.sounds)}."
+                f"Стрип очищен! Найдено баблов: {len(doc.bubbles)}, звуков: {len(doc.sounds)}."
             )
-        else:
-            self.lbl_status.setText(
-                f"Найдено баблов: {len(doc.bubbles)}, SFX: {len(doc.sounds)} | Расставлено фраз: {len(doc.lines)}."
-            )
+            return
+        text = f"Найдено баблов: {len(doc.bubbles)}, звуков: {len(doc.sounds)} | Расставлено фраз: {len(doc.lines)}."
+        undashed = translation.replies_without_dash(doc.lines)
+        if undashed:
+            names = ", ".join(f"«{ln.text[:20]}»" for ln in undashed[:2]) + (" …" if len(undashed) > 2 else "")
+            text += f" Без тире, но не в конце — поставлены как реплики: {names}"
+        self.lbl_status.setText(text)
 
     # ------------------------------------------------------- правка блоков
 

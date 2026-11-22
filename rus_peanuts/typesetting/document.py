@@ -66,11 +66,10 @@ class TextBlock:
 def assign_places(lines: list[Line], bubbles: list[Box], sounds: list[SoundBox]):
     """Сопоставляет строки Перевода местам на стрипе по Порядку чтения.
 
-    N-я Реплика идёт в N-й Бабл, N-й Звук — в N-е место Звука; строкам без места
-    достаётся запасной ряд вверху стрипа. Известная особенность (вероятно, баг):
-    лишняя Реплика тоже сдвигает счётчик Звуков.
+    N-я Реплика идёт в N-й Бабл, N-й Звук — в N-е место Звука. Строки без места
+    встают в запасной ряд вверху стрипа и не сдвигают остальные.
     """
-    bubble_idx = sound_idx = 0
+    bubble_idx = sound_idx = spare = 0
     for line in lines:
         if line.is_reply and bubble_idx < len(bubbles):
             box = bubbles[bubble_idx]
@@ -79,8 +78,8 @@ def assign_places(lines: list[Line], bubbles: list[Box], sounds: list[SoundBox])
             box = sounds[sound_idx]
             sound_idx += 1
         else:
-            box = Box(FALLBACK_X + sound_idx * FALLBACK_STEP, FALLBACK_Y, FALLBACK_W, FALLBACK_H)
-            sound_idx += 1
+            box = Box(FALLBACK_X + spare * FALLBACK_STEP, FALLBACK_Y, FALLBACK_W, FALLBACK_H)
+            spare += 1
         yield line, box
 
 

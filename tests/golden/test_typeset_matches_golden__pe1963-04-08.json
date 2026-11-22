@@ -1,12 +1,12 @@
 {
- "status": "Найдено баблов: 3, SFX: 0 | Расставлено фраз: 4.",
+ "status": "Найдено баблов: 4, звуков: 0 | Расставлено фраз: 4.",
  "blocks": [
   {
    "text": "ПО­КУП­КА ПЛАС­ТИ­НОК ПОД­НИ­МА­ЕТ МНЕ НАС­ТРО­Е­НИЕ... КОГДА МНЕ ГРУС­ТНО, Я ПО­КУ­ПАЮ НОВЫЕ ПЛАС­ТИН­КИ..",
    "is_bubble": true,
    "font": "PeanutsRusbyme-Regular",
    "x": 252.34,
-   "y": 35.0,
+   "y": 35.5,
    "size": 21.0,
    "width": 261.32,
    "stretch": 100,
@@ -31,10 +31,10 @@
    "text": "ОГО!",
    "is_bubble": true,
    "font": "PeanutsRusbyme-Regular",
-   "x": 1793.21,
-   "y": 61.5,
+   "x": 1302.66,
+   "y": 52.5,
    "size": 22.0,
-   "width": 288.58,
+   "width": 114.68,
    "stretch": 100,
    "italic": false,
    "bold": 0,
@@ -44,16 +44,16 @@
    "text": "НАС­КОЛЬ­КО ЖЕ МОЖНО ГРУС­ТИТЬ?",
    "is_bubble": true,
    "font": "PeanutsRusbyme-Regular",
-   "x": 84.8,
-   "y": 42.5,
-   "size": 14.5,
-   "width": 150.4,
+   "x": 1793.21,
+   "y": 45.5,
+   "size": 22.0,
+   "width": 288.58,
    "stretch": 100,
    "italic": false,
    "bold": 0,
    "arch": 0
   }
  ],
- "cleaned": "07180b8b3c4c185e",
- "rendered": "5cab74037829e007"
+ "cleaned": "38c00deb71113442",
+ "rendered": "297a32c87eeb3c83"
 }

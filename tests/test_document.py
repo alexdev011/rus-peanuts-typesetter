@@ -93,30 +93,41 @@ def test_replies_fill_bubbles_in_reading_order(doc):
 
 
 def test_extra_reply_goes_to_fallback_row(doc):
-    """В 04-08 найдено 3 Бабла, а Реплик 4: четвёртая встаёт в запасной ряд вверху слева."""
-    doc.open_strip(strip("pe1963-04-08"), translation.read(DATA / "pe1963-04-08.txt"))
-    assert len(doc.bubbles) == 3
-    assert inside(center(doc, doc.blocks[3]), fallback(0))
-
-
-def test_extra_reply_steals_a_sound_slot(doc):
-    """ХАРАКТЕРИЗАЦИЯ (вероятно баг): лишняя Реплика сдвигает счётчик Звуков.
-    В 04-12 найдено 4 Бабла и 2 Звука; в Переводе 5 Реплик и 2 Звука.
-    Пятая Реплика занимает запасное место и «съедает» первый Звук:
-    первый Звук встаёт на второе найденное место, второй — в запасной ряд,
-    а первое найденное место Звука остаётся пустым."""
+    """В 04-12 найдено 4 Бабла, а Реплик 5: пятая встаёт в запасной ряд вверху слева."""
     doc.open_strip(strip("pe1963-04-12"), translation.read(DATA / "pe1963-04-12_overflow.txt"))
-    assert (len(doc.bubbles), len(doc.sounds)) == (4, 2)
-    sounds = [b for b in doc.blocks if not b.is_reply]
-    assert inside(center(doc, sounds[0]), doc.sounds[1])
-    assert inside(center(doc, sounds[1]), fallback(2))
-    assert not any(inside(center(doc, s), doc.sounds[0]) for s in sounds)
+    assert len(doc.bubbles) == 4
+    replies = [b for b in doc.blocks if b.is_reply]
+    assert inside(center(doc, replies[4]), fallback(0))
 
 
-def test_sound_inherits_detected_arch(doc):
-    doc.open_strip(strip("pe1963-04-10"), lines("БАЦ!\n"))
-    assert doc.sounds[0].arch != 0
-    assert doc.blocks[0].arch == doc.sounds[0].arch
+def test_extra_lines_do_not_shift_each_other():
+    """Лишняя Реплика не сдвигает Звуки: у каждого типа своя очередь мест."""
+    from rus_peanuts.typesetting.analysis import Box, SoundBox
+    from rus_peanuts.typesetting.document import assign_places
+
+    bubbles = [Box(0, 0, 10, 10)]
+    sounds = [SoundBox(100, 0, 10, 10, 0), SoundBox(200, 0, 10, 10, 0)]
+    placed = [box for _, box in assign_places(lines("- А\n- Б\nБАЦ!\nБУМ!\nХРЯСЬ!\n"), bubbles, sounds)]
+    assert placed[0] == bubbles[0]
+    assert placed[1] == fallback(0)               # лишняя Реплика
+    assert placed[2:4] == sounds                  # Звуки — на свои места
+    assert placed[4] == fallback(1)               # лишний Звук
+
+
+def test_sound_gets_the_detected_arch(doc):
+    from rus_peanuts.typesetting.analysis import SoundBox
+
+    block = doc.typography.fit(lines("БАЦ!\n")[0], SoundBox(100, 100, 300, 80, 25))
+    assert block.arch == 25 and not block.is_reply
+
+
+def test_arch_is_read_from_letter_centres():
+    from rus_peanuts.typesetting.analysis import _read_arch
+
+    xs = range(0, 300, 30)
+    smile = [(x, 50 + int(((x - 135) / 135) ** 2 * 20), 20, 30) for x in xs]   # края ниже середины
+    assert _read_arch(smile) > 0
+    assert _read_arch([(x, 50, 20, 30) for x in xs]) == 0                    # ровная строка
 
 
 def test_translation_before_or_after_image_gives_same_blocks(typography):

@@ -1,5 +1,7 @@
-"""Перевод (.txt): строки с тире — Реплики, без тире — Звуки.
+"""Перевод (.txt): сначала Реплики (с тире), в конце — Звуки (без тире).
 
+Звуки — строки без тире в самом конце файла. Строка без тире, после которой
+ещё есть Реплики, — тоже Реплика (например, крик в Бабле, записанный без тире).
 Даты стрипов, Сноски (`* ...`), комментарии в скобках и пустые строки пропускаются.
 """
 import re
@@ -14,19 +16,28 @@ class Line:
     """Одна строка Перевода: текст Реплики или Звука."""
     text: str
     is_reply: bool
+    dash: bool = True       # в файле строка начиналась с тире
 
 
 def parse(text: str) -> list[Line]:
-    lines = []
-    for raw in text.split("\n"):
-        s = raw.strip()
+    raw = []
+    for line in text.split("\n"):
+        s = line.strip()
         if not s or _DATE.match(s) or s.startswith("(") or s.startswith("*"):
             continue
         if s.startswith("-"):
-            lines.append(Line(s.lstrip("- ").strip(), is_reply=True))
+            raw.append((s.lstrip("- ").strip(), True))
         else:
-            lines.append(Line(s, is_reply=False))
-    return lines
+            raw.append((s, False))
+    sounds_from = len(raw)
+    while sounds_from > 0 and not raw[sounds_from - 1][1]:
+        sounds_from -= 1
+    return [Line(text, is_reply=k < sounds_from, dash=dash) for k, (text, dash) in enumerate(raw)]
+
+
+def replies_without_dash(lines: list[Line]) -> list[Line]:
+    """Строки без тире не в конце Перевода: по правилу они стали Репликами."""
+    return [ln for ln in lines if ln.is_reply and not ln.dash]
 
 
 def read(path) -> list[Line] | None:

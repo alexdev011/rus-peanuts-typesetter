@@ -35,7 +35,7 @@ def test_typeset_matches_golden(typesetter, golden, tmp_path, monkeypatch, strip
 def test_status_after_image_only(typesetter):
     ts = typesetter.load_image(fixture_path("strips", "pe1963-04-08.png"))
     assert ts.items == []
-    assert ts.win.lbl_status.text() == "Стрип очищен! Найдено баблов: 3, звуков/SFX: 0."
+    assert ts.win.lbl_status.text() == "Стрип очищен! Найдено баблов: 4, звуков: 0."
 
 
 def test_translation_loaded_before_image_is_applied_when_image_arrives(typography, typesetter):

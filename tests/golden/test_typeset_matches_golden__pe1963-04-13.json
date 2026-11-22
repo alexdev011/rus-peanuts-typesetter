@@ -1,14 +1,14 @@
 {
- "status": "Найдено баблов: 1, SFX: 0 | Расставлено фраз: 3.",
+ "status": "Найдено баблов: 3, звуков: 0 | Расставлено фраз: 3. Без тире, но не в конце — поставлены как реплики: «Я дома!»",
  "blocks": [
   {
    "text": "Я ДОМА!",
-   "is_bubble": false,
+   "is_bubble": true,
    "font": "PeanutsRusbyme-Regular",
-   "x": 75.5,
-   "y": 53.5,
-   "size": 31.0,
-   "width": 160,
+   "x": 633.27,
+   "y": 73.5,
+   "size": 22.0,
+   "width": 196.46,
    "stretch": 100,
    "italic": false,
    "bold": 0,
@@ -18,10 +18,10 @@
    "text": "КРЫСЬ­НЯ!",
    "is_bubble": true,
    "font": "PeanutsRusbyme-Regular",
-   "x": 1734.52,
-   "y": 55.5,
-   "size": 22.0,
-   "width": 454.96,
+   "x": 1200.17,
+   "y": 104.5,
+   "size": 19.5,
+   "width": 130.66,
    "stretch": 100,
    "italic": false,
    "bold": 0,
@@ -31,16 +31,16 @@
    "text": "НЕТ НИЧЕГО ХУЖЕ ЧЕМ ПРИ­ХО­ДИТЬ В ПУСТОЙ ДОМ!",
    "is_bubble": true,
    "font": "PeanutsRusbyme-Regular",
-   "x": 264.8,
-   "y": 47.0,
-   "size": 12.0,
-   "width": 150.4,
+   "x": 1734.52,
+   "y": 39.5,
+   "size": 22.0,
+   "width": 454.96,
    "stretch": 100,
    "italic": false,
    "bold": 0,
    "arch": 0
   }
  ],
- "cleaned": "3c7b3f0e6b200c3a",
- "rendered": "fbc8c23d8431f1db"
+ "cleaned": "88ca0e568d829008",
+ "rendered": "d65d31aa24dc1286"
 }

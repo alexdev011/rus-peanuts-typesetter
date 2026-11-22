@@ -1,7 +1,7 @@
 """Анализ стрипа: какие Баблы и Звуки находятся и как выглядит Очистка.
 
-Это эталонные (golden) тесты: они фиксируют результат как есть, включая
-известные промахи (см. test_known_detection_gaps).
+Эталонные (golden) тесты фиксируют результат как есть; отдельные тесты ниже
+описывают, что поиск находит, а что пока пропускает.
 """
 import pytest
 
@@ -48,26 +48,51 @@ def test_original_is_not_modified_by_cleaning():
     assert (result.cleaned != before).any()
 
 
-def test_known_detection_gaps():
-    """ХАРАКТЕРИЗАЦИЯ известных промахов на сканах ~2200 px шириной:
-    * короткая реплика «WOW!» (меньше 6 букв) не находится как Бабл;
-    * крупные буквы обычных реплик дополнительно находятся как Звуки.
-    """
-    bubbles = analyze(fixture_path("strips", "pe1963-04-08.png")).bubbles
-    assert len(bubbles) == 3  # в стрипе 4 бабла, «WOW!» потерян
-    wow_panel = (1130, 1680)   # x-диапазон третьего кадра
-    assert not any(wow_panel[0] <= b[0] <= wow_panel[1] for b in bubbles)
+def overlaps(box, x0, y0, x1, y1):
+    x, y, w, h = box[:4]
+    return x < x1 and x + w > x0 and y < y1 and y + h > y0
 
-    sounds = analyze(fixture_path("strips", "pe1963-04-09.png")).sounds
-    assert len(sounds) == 2  # в стрипе нет ни одного Звука — это обычные реплики
+
+def test_short_and_bold_replies_are_found():
+    """Короткая «WOW!» и крупная жирная реплика у самой рамки кадра — тоже Баблы."""
+    bubbles = analyze(fixture_path("strips", "pe1963-04-08.png")).bubbles
+    assert len(bubbles) == 4
+    assert any(overlaps(b, 1130, 0, 1680, 200) for b in bubbles)        # «WOW!» в третьем кадре
+    bubbles = analyze(fixture_path("pages", "wpage_101.png")).bubbles
+    assert any(overlaps(b, 1612, 787, 2325, 887) for b in bubbles)     # «HAVE YOU EVER SEEN…»
+
+
+def test_large_letters_of_replies_are_not_sounds():
+    """Раньше крупные буквы реплик находились ещё и как Звуки — теперь дублей нет."""
+    for name in ("pe1963-04-09.png", "pe1963-04-10.png", "pe1963-04-11.png", "pe1963-04-12.png"):
+        assert analyze(fixture_path("strips", name)).sounds == []
+    assert analyze(fixture_path("pages", "wpage_101.png")).sounds == []
+
+
+def test_sounds_on_the_drawing():
+    """KLUNK! и SMACK! — Звуки. Пока не находятся: POW! (буквы контуром слиплись с линиями)
+    и ZZZ (буквы столбиком)."""
+    sounds = analyze(fixture_path("strips", "pe1963-04-14.png")).sounds
+    assert len(sounds) == 1 and overlaps(sounds[0], 330, 940, 600, 1010)    # KLUNK!
+    result = analyze(fixture_path("pages", "page_102.png"))
+    assert len(result.sounds) == 1 and overlaps(result.sounds[0], 1290, 1590, 1500, 1650)  # SMACK!
+    places = result.bubbles + result.sounds
+    assert not any(overlaps(b, 1287, 1012, 1390, 1075) for b in places)    # POW!
+
+
+def test_logo_signature_dates_and_page_captions_are_not_places():
+    """Логотип PEANUTS и by SCHULZ, подписи SCHULZ, даты, лица и трава, «Page 89» — не места."""
+    for folder, name, logo in (("pages", "wpage_101.png", (160, 330, 780, 620)),
+                               ("strips", "pe1963-04-14.png", (287, 112, 875, 400))):
+        result = analyze(fixture_path(folder, name))
+        assert not any(overlaps(b, *logo) for b in result.bubbles + result.sounds)
+    result = analyze(fixture_path("pages", "page_100.png"))
+    assert len(result.bubbles) == 11 and result.sounds == []               # 11 Баблов, больше ничего
+    assert not any(b[1] > 1700 for b in result.bubbles)                    # «Page 89» внизу
 
 
 def test_bubbles_are_in_reading_order():
     bubbles = analyze(fixture_path("pages", "page_100.png")).bubbles
-    # ХАРАКТЕРИЗАЦИЯ: подпись страницы сборника «Page 89» внизу тоже находится как Бабл
-    footer = [b for b in bubbles if b[1] > 1700]
-    assert len(footer) == 1
-    bubbles = [b for b in bubbles if b not in footer]
     rows = []
     for b in bubbles:
         if rows and abs(b[1] - rows[-1][-1][1]) < 150:

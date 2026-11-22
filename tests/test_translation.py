@@ -1,4 +1,6 @@
-"""Разбор Перевода (.txt): какие строки становятся Репликами, какие Звуками, какие пропускаются."""
+"""Разбор Перевода (.txt): какие строки становятся Репликами, какие Звуками, какие пропускаются.
+
+Правило: сначала Реплики (с тире), в конце файла — Звуки (без тире)."""
 from rus_peanuts.typesetting import translation
 
 
@@ -12,12 +14,26 @@ def write(tmp_path, text, encoding="utf-8"):
     return p
 
 
-def test_dash_means_reply_no_dash_means_sound():
-    assert parsed("- Привет, Чарли Браун!\nХАХАХА!\n- Как дела?\n") == [
+def test_sounds_are_the_lines_without_dash_at_the_end():
+    assert parsed("- Привет, Чарли Браун!\n- Как дела?\nБАЦ!\nХАХАХА!\n") == [
         ("Привет, Чарли Браун!", True),
-        ("ХАХАХА!", False),
         ("Как дела?", True),
+        ("БАЦ!", False),
+        ("ХАХАХА!", False),
     ]
+
+
+def test_line_without_dash_before_replies_is_a_reply():
+    """Крик в Бабле, записанный без тире: после него ещё есть Реплики, значит, это не Звук."""
+    lines = translation.parse("Я дома!\n- Крысьня!\n- Нет ничего хуже...\nБАЦ!\n")
+    assert [(ln.text, ln.is_reply) for ln in lines] == [
+        ("Я дома!", True), ("Крысьня!", True), ("Нет ничего хуже...", True), ("БАЦ!", False),
+    ]
+    assert [ln.text for ln in translation.replies_without_dash(lines)] == ["Я дома!"]
+
+
+def test_only_sounds():
+    assert parsed("БАЦ!\nБУМ!\n") == [("БАЦ!", False), ("БУМ!", False)]
 
 
 def test_dates_footnotes_comments_and_blank_lines_are_skipped():
