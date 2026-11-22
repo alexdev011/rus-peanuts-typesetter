@@ -188,26 +188,20 @@ def typesetter(ct):
     ts.win.deleteLater()
 
 
-# ----------------------------------------------- адаптер: Multi tool (Wand)
+# --------------------------------------------------- адаптер: Multi tool
 
 class MultiTool:
     """Запускает операции Multi tool так же, как кнопка «Go» во вкладке Qt."""
 
-    def __init__(self, ct, workdir: Path):
-        self.ct = ct
+    def __init__(self, workdir: Path):
         self.workdir = workdir
         self.logs = []
 
     def run(self, path, operation, folder=False, contrast=False, date="YYYY-MM-DD"):
-        go = self.ct.Start(
-            path=str(path).replace("\\", "/"),
-            folder=folder,
-            contrast=1 if contrast else 0,
-            operation=operation,
-            date=date,
-            logger=self.logs.append,
-        )
-        go.start_multi()
+        from rus_peanuts import publishing
+
+        publishing.run(str(path).replace("\\", "/"), operation, folder=folder,
+                       contrast=contrast, date=date, log=self.logs.append)
         return self
 
     def results(self):
@@ -224,8 +218,6 @@ class MultiTool:
 
 
 @pytest.fixture
-def multitool(ct, tmp_path, monkeypatch):
-    if not ct.HAS_IMAGEMAGICK:
-        pytest.skip("ImageMagick не найден — Multi tool не работает")
+def multitool(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)  # Multi tool пишет result/ и 'validation list.txt' в текущую папку
-    return MultiTool(ct, tmp_path)
+    return MultiTool(tmp_path)

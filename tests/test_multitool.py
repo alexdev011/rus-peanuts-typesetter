@@ -1,8 +1,9 @@
 """Подготовка к публикации (Multi tool): Нарезка, Квадрат, Acomics, Датировка, Лист проверки.
 
-Сейчас всё работает через Wand/ImageMagick. Эти тесты — страховка для переезда
-на numpy/Pillow: имена файлов и размеры должны совпасть точно, а пиксели —
-почти точно (эталонные картинки лежат локально в tests/fixtures/golden/).
+Эталоны сняты со старой версии на Wand/ImageMagick. После переезда на numpy
+имена файлов, размеры и пиксели Нарезки и Квадрата совпадают точно, а у Acomics
+масштабирование может отличаться на 1 уровень яркости в единичных пикселях —
+это проверяет test_acomics_size (см. docs/adr/0001-drop-imagemagick.md).
 """
 import shutil
 
@@ -67,11 +68,25 @@ def test_square_matches_golden(multitool, golden):
     ("pe1963-04-14.png", (705, 1024)),   # Воскресный стрип (высота оригинала >= 1000)
 ], ids=["daily", "sunday"])
 def test_acomics_size(multitool, golden, strip, size):
+    import cv2
+    import numpy as np
+
+    from conftest import GOLDEN_IMG
+
     mt = multitool.run(fixture_path("strips", strip), "acomics")
-    results = mt.results()
-    assert [img.shape[:2] for img in results.values()] == [size]
-    g = golden()
-    g.check(summary(g, results))
+    (name, img), = mt.results().items()
+    assert img.shape == size  # серый PNG ровно под Acomics
+    golden().check({name: list(img.shape)})
+
+    # Пиксели сверяем с картинкой, снятой со старой версии на ImageMagick:
+    # допускается разница в 1 уровень яркости у единичных пикселей.
+    ref_path = GOLDEN_IMG / f"wand__acomics__{strip}"
+    if not ref_path.exists():
+        pytest.skip("нет локального эталона ImageMagick")
+    ref = cv2.imread(str(ref_path), cv2.IMREAD_UNCHANGED)
+    diff = np.abs(ref.astype(int) - img.astype(int))
+    assert diff.max() <= 1
+    assert (diff > 0).mean() < 1e-4
 
 
 def test_nothing_just_converts_to_png(multitool, tmp_path):
@@ -147,3 +162,15 @@ def test_validation_list_rejects_bad_names(multitool, tmp_path):
 def test_errors_go_to_log_not_exceptions(multitool, tmp_path):
     multitool.run(tmp_path / "нет такого файла.png", "slice")
     assert len(multitool.logs) == 1
+
+
+# ------------------------------------------------------- вкладка в окне
+
+def test_go_button_runs_selected_operation(ct, typesetter, multitool):
+    tab = typesetter.win.tab_multitool
+    tab.rb_file.setChecked(True)
+    tab.edit_path.setText(str(fixture_path("strips", "pe1963-04-08.png")).replace("\\", "/"))
+    next(rb for rb, op in tab.op_radios.items() if op == "acomics").setChecked(True)
+    tab.btn_go.click()
+    assert tab.output_box.toPlainText() == ""
+    assert [img.shape for img in multitool.results().values()] == [(223, 1024)]

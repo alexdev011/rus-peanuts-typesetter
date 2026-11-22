@@ -17,7 +17,6 @@ def ensure_dependencies():
         ("PyQt6", "PyQt6"),
         ("cv2", "opencv-python"),
         ("numpy", "numpy"),
-        ("wand", "Wand"),
         ("PIL", "Pillow"),
     ]
     missing = []
@@ -74,103 +73,6 @@ def ensure_dependencies():
 
 
 
-def ensure_imagemagick_engine():
-    import glob
-    exe_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-    candidate_dirs = [
-        os.path.join(exe_dir, "imagemagick"),
-        os.path.join(exe_dir, "ImageMagick"),
-    ]
-    if hasattr(sys, "_MEIPASS"):
-        candidate_dirs.insert(0, os.path.join(sys._MEIPASS, "imagemagick"))
-
-    for pf_env in ("ProgramFiles", "ProgramFiles(x86)", "LocalAppData"):
-        pf_path = os.environ.get(pf_env)
-        if pf_path:
-            candidate_dirs.extend(glob.glob(os.path.join(pf_path, "ImageMagick*")))
-
-    for d in candidate_dirs:
-        if os.path.isdir(d):
-            dlls = glob.glob(os.path.join(d, "*MagickWand*.dll")) + glob.glob(os.path.join(d, "CORE_RL_wand*.dll"))
-            if dlls:
-                os.environ["MAGICK_HOME"] = d
-                if d not in os.environ.get("PATH", ""):
-                    os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
-                break
-
-    try:
-        from wand.image import Image as _TestWandImage
-        return True
-    except ImportError as e:
-        print(f"[!] Системный движок ImageMagick не найден: {e}")
-
-    if os.name == "nt":
-        should_install_im = True
-        try:
-            import ctypes
-            msg = (
-                "Для работы второй вкладки («Multi tool for Pinats») требуется системная программа ImageMagick (DLL), "
-                "которая сейчас не установлена на этом компьютере.\n\n"
-                "Нажми «Да», чтобы скачать и установить ImageMagick автоматически прямо сейчас!\n"
-                "(После установки нужно будет один раз перезапустить программу)."
-            )
-            res = ctypes.windll.user32.MessageBoxW(0, msg, "Автоустановка ImageMagick", 0x24)
-            if res != 6:
-                should_install_im = False
-        except Exception:
-            pass
-
-        if should_install_im:
-            installed_ok = False
-            try:
-                print("[*] Пробуем установить ImageMagick через winget...")
-                ret = subprocess.call([
-                    "winget", "install", "--id", "ImageMagick.ImageMagick",
-                    "-e", "--accept-source-agreements", "--accept-package-agreements"
-                ])
-                if ret == 0:
-                    installed_ok = True
-            except Exception:
-                pass
-
-            if not installed_ok:
-                try:
-                    import urllib.request
-                    import tempfile
-                    print("[*] Скачиваем официальный установщик ImageMagick...")
-                    html = urllib.request.urlopen("https://imagemagick.org/archive/binaries/", timeout=15).read().decode("utf-8", errors="ignore")
-                    matches = re.findall(r'(ImageMagick-7\.[0-9.\-]+-Q16-HDRI-x64-dll\.exe)', html)
-                    if matches:
-                        installer_name = sorted(set(matches))[-1]
-                        url = f"https://imagemagick.org/archive/binaries/{installer_name}"
-                        tmp_exe = os.path.join(tempfile.gettempdir(), installer_name)
-                        urllib.request.urlretrieve(url, tmp_exe)
-                        print(f"[*] Запускаем установку {installer_name}...")
-                        subprocess.check_call([tmp_exe, "/SILENT", "/NORESTART"])
-                        installed_ok = True
-                except Exception as ex:
-                    print(f"[!] Не удалось автоматически скачать установщик: {ex}")
-
-            for pf_env in ("ProgramFiles", "ProgramFiles(x86)"):
-                pf_path = os.environ.get(pf_env)
-                if pf_path:
-                    for d in glob.glob(os.path.join(pf_path, "ImageMagick*")):
-                        if os.path.isdir(d):
-                            os.environ["MAGICK_HOME"] = d
-                            os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
-            try:
-                from wand.image import Image as _TestWandImage
-                return True
-            except ImportError:
-                if installed_ok:
-                    try:
-                        import ctypes
-                        ctypes.windll.user32.MessageBoxW(0, "ImageMagick успешно установлен! Перезапусти программу.", "ImageMagick установлен", 0x40)
-                    except Exception:
-                        pass
-    return False
-
-HAS_IMAGEMAGICK = ensure_imagemagick_engine()
 ensure_dependencies()
 
 
@@ -1112,322 +1014,16 @@ class StripCanvasView(QGraphicsView):
 
 
 
-# ОРИГИНАЛЬНЫЙ КОД ВТОРОЙ ПРОГРАММЫ: Multi tool for Pinats by Alimtair (Wand / ImageMagick + Tkinter)
-
-import datetime
-try:
-    from wand.image import Image as WandImage
-except ImportError:
-    WandImage = None
-from PIL import Image as pil
-
-
-class constants:
-    MIN_SQ_W = 500
-    RES = 'result/'
-    ACOM_X = 1024
-    ACOM_Y = 223
-    ACOM_W_Y = 705
-    GO_X = 400
-    GO_Y = 250
-    W_GO_X = 400
-    W_GO_Y = 250
-    WHITE_PIXEL = 'srgb(250,250,250)'
-
-
-class Level:
-    def __init__(self, img):
-        self.img = img
-        self.clone = self.img.clone()
-
-    def invert(self):
-        img_inverted = self.clone
-        img_inverted.level(0.6, 0.5, gamma=1)
-        return img_inverted
-
-    def contrast(self):
-        img_contrast = self.img
-        img_contrast.level(0.23529411764705882, 0.9098039215686274)
-        return img_contrast
-
-
-class Start:
-    def __init__(self, path, folder, contrast, operation, date, logger):
-        self.path = path
-        self.folder = folder
-        self.contrast = contrast
-        self.operation = operation
-        self.date = date
-        self.log = logger
-
-    def pret_start(self):
-        global WandImage
-        if WandImage is None:
-            if ensure_imagemagick_engine():
-                from wand.image import Image as WandImage
-            else:
-                raise RuntimeError("Движок ImageMagick не установлен! Установи ImageMagick для работы этой функции.")
-        self.original = WandImage(filename=self.file)
-        self.edit_img = self.original.clone()
-        self.edit_img.format = 'png'
-        if self.contrast:
-            self.level = Level(self.edit_img)
-            self.edit_img = self.level.contrast()
-
-    def start_multi(self):
-        os.makedirs(constants.RES, exist_ok=True)
-        initial_date = Operation()
-        initial_date.give_date(date=self.date)
-        try:
-            if self.path[0].isdigit():
-                operation = Operation(
-                    command=self.operation,
-                    file_name=self.path,
-                    logger=self.log
-                )
-                operation.operr()
-            elif self.folder:
-                file_list = os.listdir(self.path)
-                file_list.sort()
-                for self.file_name in file_list:
-                    if self.file_name.endswith('jpg') or self.file_name.endswith('png') or self.file_name.endswith('gif'):
-                        self.file = self.path + '/' + self.file_name
-                        self.pret_start()
-                        operation = Operation(
-                            img=self.edit_img,
-                            command=self.operation,
-                            file_name=self.file_name,
-                            logger=self.log
-                        )
-                        operation.operr()
-            else:
-                self.file = self.path
-                self.pret_start()
-                lst = self.file.split(sep='/')
-                self.file_name = lst[-1]
-                operation = Operation(
-                    img=self.edit_img,
-                    command=self.operation,
-                    file_name=self.file_name,
-                    logger=self.log
-                )
-                operation.operr()
-        except Exception as e:
-            self.log(str(e))
-
-
-class Operation:
-    cur_date = 'nothing'
-
-    def __init__(self, logger='none', img='none', command='none', file_name='none'):
-        self.edit_img = img
-        self.command = command
-        self.file_name = file_name
-        self.log = logger
-        if img != 'none':
-            self.level = Level(self.edit_img)
-            self.inverted = self.level.invert()
-
-    @classmethod
-    def give_date(cls, date):
-        Operation.cur_date = date
-
-    def operr(self):
-        command = self.command
-        if command == 'slice':
-            if self.file_name[0] == 'w':
-                self.clone_1 = self.edit_img.clone()
-                self.w_slice()
-            else:
-                self.clone_1 = self.edit_img.clone()
-                self.clone_2 = self.edit_img.clone()
-                self.clone_3 = self.edit_img.clone()
-                self.slice()
-        elif command == 'date':
-            self.date()
-        elif command == 'square':
-            self.clone_1 = self.edit_img.clone()
-            self.clone_2 = self.edit_img.clone()
-            self.square()
-        elif command == 'acomics':
-            self.clone_1 = self.edit_img.clone()
-            self.acomics()
-        elif command == 'add_to_validation_list':
-            self.add_to_validation_list()
-        elif command == 'validate':
-            self.validate()
-        else:
-            self.img_save(to_save=self.edit_img)
-
-    @staticmethod
-    def w_and_h(inverte, x, y, weekend=False):
-        marker = 0
-        marker = inverte.width - 2
-        while inverte[marker, y + 10].string < constants.WHITE_PIXEL:
-            marker -= 2
-        w = marker - x
-        if not weekend:
-            h = int((inverte.height - 3 * y) / 3)
-            marker = h + y + 10
-            while inverte[x + 15, marker].string < constants.WHITE_PIXEL:
-                marker -= 2
-            h = marker - y
-        else:
-            marker = inverte.height
-            while inverte[x + 20, marker - 1].string <= constants.WHITE_PIXEL and marker > 0:
-                marker -= 3
-            h = marker - y
-        w += 30
-        h += 40
-        return (w, h)
-
-    @staticmethod
-    def upper_left(inverte, mark_x, mark_y, x=0, y=0):
-        while inverte[x, mark_y].string < constants.WHITE_PIXEL:
-            x += 2
-        while inverte[mark_x, y].string < constants.WHITE_PIXEL:
-            y += 2
-        return (x, y)
-
-    def slice(self):
-        strips = [self.clone_1, self.clone_2, self.clone_3]
-        mark_x = constants.GO_X
-        mark_y = constants.GO_Y
-        x, y = self.upper_left(inverte=self.inverted, mark_x=mark_x, mark_y=mark_y)
-        space = y
-        w, h = self.w_and_h(inverte=self.inverted, x=x, y=y)
-        for i in range(3):
-            if i != 0:
-                x, y = self.upper_left(inverte=self.inverted, mark_x=mark_x, mark_y=mark_y, y=y)
-            x -= 15
-            y -= 20
-            strips[i].crop(x, y, width=w, height=h)
-            if i == 0:
-                mark_y = 2 * space + h
-                y = space + h
-            elif i == 1:
-                mark_y = int(strips[i + 1].height - space - 0.7 * h)
-                y = strips[i + 1].height - space - h
-            self.img_save(to_save=strips[i], special_arg=True, i=i)
-
-    def w_slice(self):
-        mark_x = constants.W_GO_X
-        mark_y = constants.W_GO_Y
-        x, y = self.upper_left(inverte=self.inverted, mark_x=mark_x, mark_y=mark_y)
-        w, h = self.w_and_h(inverte=self.inverted, x=x, y=y, weekend=True)
-        x -= 15
-        y -= 20
-        self.edit_img.crop(x, y, width=w, height=h)
-        self.img_save(to_save=self.edit_img)
-
-    def square(self):
-        w = int(self.clone_1.width / 2)
-        h = self.clone_1.height
-        mark_x = constants.GO_X
-        mark_y = constants.GO_Y
-        x, y = self.upper_left(inverte=self.inverted, mark_x=mark_x, mark_y=mark_y)
-        self.clone_1.crop(x, 0, width=w, height=h)
-        self.clone_2.crop(w, 0, width=w, height=h)
-        self.level = Level(self.clone_2)
-        inverted_clone_2 = self.level.invert()
-        x, y = self.upper_left(inverte=inverted_clone_2, mark_x=mark_x, mark_y=mark_y)
-        self.clone_2.crop(x, y, width=w, height=h)
-        w1 = self.clone_1.width
-        w2 = self.clone_2.width
-        w_res = min(w1, w2)
-        h_res = self.clone_1.height + self.clone_2.height
-        cntrl_point = h
-        res = WandImage(width=w_res + 5, height=h_res, background='white')
-        res.composite(image=self.clone_2, left=5, top=cntrl_point)
-        res.composite(image=self.clone_1, left=5, top=0)
-        self.img_save(to_save=res)
-
-    def acomics(self):
-        h = self.clone_1.height
-        if h < 1000:
-            self.clone_1.resize(constants.ACOM_X, constants.ACOM_Y)
-        else:
-            self.clone_1.resize(constants.ACOM_X, constants.ACOM_W_Y)
-        self.img_save(to_save=self.clone_1)
-
-    def img_save(self, to_save, special_arg=False, i=False):
-        os.makedirs(constants.RES, exist_ok=True)
-        if special_arg:
-            self.save = self.file_name[:-4] + ' ' + str(i) + '.png'
-        else:
-            self.save = self.file_name[:-4] + '.png'
-        self.save = constants.RES + self.save
-        to_save.save(filename=self.save)
-
-    def date(self):
-        self.file_name = 'pe' + Operation.cur_date + '.png'
-        self.img_save(to_save=self.edit_img)
-        lst = Operation.cur_date.split(sep='-')
-        year = int(lst[0])
-        month = int(lst[1])
-        day = int(lst[2])
-        D = datetime.date(year, month, day)
-        delta = datetime.timedelta(days=1)
-        D = D + delta
-        year = str(D.year)
-        month = self.add_zero(date=D.month)
-        day = self.add_zero(date=D.day)
-        Operation.cur_date = year + '-' + month + '-' + day
-
-    def add_to_validation_list(self):
-        file_name = self.file_name[:-4]
-        if file_name[0].isdigit() and len(file_name) == 10:
-            date = file_name
-        elif len(file_name) == 12:
-            date = file_name[2:]
-        else:
-            self.log(
-                f'Стрип не правльно назван или \nне правильного формата, его название\n'
-                f'{file_name}.\nСтрип должен быть peYYYY-MM-DD.png или\nYYYY-MM-DD.png. Обязательно пнг'
-            )
-            return 0
-        if not os.path.exists('validation list.txt'):
-            with open('validation list.txt', 'w', encoding='utf-8') as f:
-                f.write('')
-        with open('validation list.txt', 'r+', encoding='utf-8') as file:
-            existing_data = file.read().strip()
-            validation_set = set(x.strip() for x in existing_data.split(',') if x.strip())
-            validation_set.add(date)
-            file.seek(0)
-            file.truncate()
-            file_text = ', '.join(list(validation_set))
-            file.write(file_text)
-        self.log(f'Стрип по дате: {date} добавлен в лист')
-
-    def validate(self):
-        file_name = self.file_name
-        if file_name[0].isdigit():
-            date = file_name[0:10]
-        else:
-            date = file_name[2:12]
-        with open('validation list.txt', 'r', encoding='utf-8') as file:
-            existing_data = file.read().strip()
-            validation_set = set(x.strip() for x in existing_data.split(',') if x.strip())
-            if date in validation_set:
-                self.log(f'Стрип по дате: {date} уже переведен')
-            else:
-                self.log(f'Стрип по дате: {date} не переведен')
-
-    @staticmethod
-    def add_zero(date):
-        if date < 10:
-            date = '0' + str(date)
-        return str(date)
-
-
 from PyQt6.QtWidgets import (
     QTabWidget, QLineEdit, QCheckBox, QRadioButton,
     QButtonGroup, QGroupBox, QTextEdit, QGridLayout
 )
 
+from rus_peanuts import publishing
+
 
 class MultiToolQtTab(QWidget):
-    """Вкладка Multi tool for Pinats by Alimtair внутри общего окна (вызывает оригинальный Start / Operation на Wand + ImageMagick)"""
+    """Вкладка Multi tool for Pinats by Alimtair: подготовка стрипов к публикации (rus_peanuts.publishing)"""
     def __init__(self, main_win):
         super().__init__()
         self.main_win = main_win
@@ -1487,17 +1083,8 @@ class MultiToolQtTab(QWidget):
         op_box = QGroupBox("Operation")
         op_v = QVBoxLayout(op_box)
         self.op_group = QButtonGroup(self)
-        ops = [
-            ("Slice", "slice"),
-            ("Date", "date"),
-            ("Square", "square"),
-            ("acomics", "acomics"),
-            ("add to validation list", "add_to_validation_list"),
-            ("validate", "validate"),
-            ("Nothing", "nothing"),
-        ]
         self.op_radios = {}
-        for title, val in ops:
+        for val, title in publishing.OPERATIONS.items():
             rb = QRadioButton(title)
             if val == "slice":
                 rb.setChecked(True)
@@ -1548,15 +1135,14 @@ class MultiToolQtTab(QWidget):
         self.output_box.append(str(message))
 
     def go_Multi(self):
-        go = Start(
-            path=self.edit_path.text(),
-            folder=bool(self.rb_folder.isChecked()),
-            contrast=1 if self.chk_contrast.isChecked() else 0,
-            operation=self.get_operation_value(),
+        publishing.run(
+            self.edit_path.text(),
+            self.get_operation_value(),
+            folder=self.rb_folder.isChecked(),
+            contrast=self.chk_contrast.isChecked(),
             date=self.edit_date.text(),
-            logger=self.log
+            log=self.log,
         )
-        go.start_multi()
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -1720,7 +1306,7 @@ class MainWindow(QMainWindow):
 
         self.tab_multitool = MultiToolQtTab(self)
         self.tabs.addTab(self.tab_typesetter, "1. RUS PEANUTS — Auto-Typesetter")
-        self.tabs.addTab(self.tab_multitool, "2. Multi tool for Pinats by Alimtair (ImageMagick)")
+        self.tabs.addTab(self.tab_multitool, "2. Multi tool for Pinats by Alimtair")
 
         self.shortcut_undo = QShortcut(QKeySequence("Ctrl+Z"), self)
         self.shortcut_undo.activated.connect(self.undo_action)
