@@ -6,6 +6,12 @@
 import pytest
 
 from conftest import fixture_path
+from rus_peanuts.typesetting import analysis
+
+
+def analyze(path):
+    return analysis.analyze(analysis.load_image(path))
+
 
 IMAGES = [
     ("strips", f"pe1963-04-{d:02d}.png") for d in range(8, 15)
@@ -17,42 +23,47 @@ IMAGES = [
 
 
 @pytest.mark.parametrize("folder, name", IMAGES, ids=[n for _, n in IMAGES])
-def test_analysis_matches_golden(ct, golden, folder, name):
-    path = fixture_path(folder, name)
-    img, erase_mask, bubbles, sounds = ct.analyze_strip_universal(str(path))
+def test_analysis_matches_golden(golden, folder, name):
+    result = analyze(fixture_path(folder, name))
     g = golden()
-    cleaned = ct.clean_selected_bubbles(img, erase_mask, bubbles + sounds)
     g.check({
-        "size": list(img.shape),
-        "bubbles": [list(map(int, b)) for b in bubbles],
-        "sounds": [list(map(int, s)) for s in sounds],  # x, y, w, h, Изгиб
-        "erase_mask": g.image("erase_mask", erase_mask),
-        "cleaned": g.image("cleaned", cleaned),
+        "size": list(result.original.shape),
+        "bubbles": [list(b) for b in result.bubbles],
+        "sounds": [list(s) for s in result.sounds],  # x, y, w, h, Изгиб
+        "cleaned": g.image("cleaned", result.cleaned),
     })
 
 
-def test_unreadable_file_returns_empty(ct, tmp_path):
+def test_unreadable_file_is_none(tmp_path):
     bad = tmp_path / "broken.png"
     bad.write_bytes(b"not an image")
-    assert ct.analyze_strip_universal(str(bad)) == (None, None, [], [])
+    assert analysis.load_image(bad) is None
 
 
-def test_known_detection_gaps(ct):
+def test_original_is_not_modified_by_cleaning():
+    img = analysis.load_image(fixture_path("strips", "pe1963-04-08.png"))
+    before = img.copy()
+    result = analysis.analyze(img)
+    assert (img == before).all()
+    assert (result.cleaned != before).any()
+
+
+def test_known_detection_gaps():
     """ХАРАКТЕРИЗАЦИЯ известных промахов на сканах ~2200 px шириной:
     * короткая реплика «WOW!» (меньше 6 букв) не находится как Бабл;
     * крупные буквы обычных реплик дополнительно находятся как Звуки.
     """
-    _, _, bubbles, sounds = ct.analyze_strip_universal(str(fixture_path("strips", "pe1963-04-08.png")))
+    bubbles = analyze(fixture_path("strips", "pe1963-04-08.png")).bubbles
     assert len(bubbles) == 3  # в стрипе 4 бабла, «WOW!» потерян
     wow_panel = (1130, 1680)   # x-диапазон третьего кадра
     assert not any(wow_panel[0] <= b[0] <= wow_panel[1] for b in bubbles)
 
-    _, _, bubbles, sounds = ct.analyze_strip_universal(str(fixture_path("strips", "pe1963-04-09.png")))
+    sounds = analyze(fixture_path("strips", "pe1963-04-09.png")).sounds
     assert len(sounds) == 2  # в стрипе нет ни одного Звука — это обычные реплики
 
 
-def test_bubbles_are_in_reading_order(ct):
-    _, _, bubbles, _ = ct.analyze_strip_universal(str(fixture_path("pages", "page_100.png")))
+def test_bubbles_are_in_reading_order():
+    bubbles = analyze(fixture_path("pages", "page_100.png")).bubbles
     # ХАРАКТЕРИЗАЦИЯ: подпись страницы сборника «Page 89» внизу тоже находится как Бабл
     footer = [b for b in bubbles if b[1] > 1700]
     assert len(footer) == 1
