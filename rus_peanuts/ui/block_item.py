@@ -30,13 +30,19 @@ class BlockItem(BlockGraphic):
 
     # ---------------------------------------------------------------- вид
 
+    def _handle_size(self) -> float:
+        """Маркеры одного размера на экране при любом масштабе холста."""
+        views = self.scene().views() if self.scene() else []
+        zoom = views[0].transform().m11() if views else 1.0
+        return HANDLE_SIZE / max(zoom, 0.05)
+
     def width_handle_rect(self):
-        r = self.text_rect()
-        return QRectF(r.right() - HANDLE_SIZE, r.center().y() - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE)
+        r, s = self.text_rect(), self._handle_size()
+        return QRectF(r.right() - s, r.center().y() - s / 2, s, s)
 
     def scale_handle_rect(self):
-        r = self.text_rect()
-        return QRectF(r.right() - HANDLE_SIZE, r.bottom() - HANDLE_SIZE, HANDLE_SIZE, HANDLE_SIZE)
+        r, s = self.text_rect(), self._handle_size()
+        return QRectF(r.right() - s, r.bottom() - s, s, s)
 
     def paint(self, painter, option, widget=None):
         super().paint(painter, option, widget)

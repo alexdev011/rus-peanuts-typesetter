@@ -65,23 +65,15 @@ def test_shadow_button_means_different_things_for_reply_and_sound():
 
 
 def test_limits():
-    b = block(size=6, width=50)
-    for _ in range(100):
-        b.grow(-0.5), b.stretch_by(-10), b.thicken(-1), b.widen(-10)
-    assert (b.size, b.stretch, b.bold, b.width) == (5.0, 50, 0, 45)
-    for _ in range(100):
-        b.stretch_by(10), b.thicken(1)
+    b = block()
+    b.set_stretch(10), b.set_bold(-3)
+    assert (b.stretch, b.bold) == (50, 0)
+    b.set_stretch(1000), b.set_bold(99)
     assert (b.stretch, b.bold) == (400, 10)
     b.set_arch(1000)
     assert b.arch == 150
     b.set_arch(-1000)
     assert b.arch == -150
-
-
-def test_width_change_ignores_sounds():
-    s = block(is_reply=False, width=160)
-    s.widen(10)
-    assert s.width == 160
 
 
 def test_editing_reply_text_rehyphenates():
@@ -163,8 +155,8 @@ def loaded(doc):
 def test_undo_restores_blocks_and_selection(loaded):
     before = [block_state(b) for b in loaded.blocks]
     loaded.checkpoint(selected=[1])
-    loaded.blocks[1].grow(2)
-    loaded.blocks[1].toggle_italic()
+    loaded.blocks[1].size += 2
+    loaded.blocks[1].set_italic(True)
     assert loaded.undo() == [1]
     assert [block_state(b) for b in loaded.blocks] == before
     assert loaded.undo() is None

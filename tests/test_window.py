@@ -72,35 +72,75 @@ def test_toolbar_edits_only_selected_blocks(loaded):
     first, second = ts.items[0], ts.items[1]
     before_second = block_state(second.block)
     ts.select(first)
-    size = first.block.size
-    ts.win.btn_plus.click()
-    ts.win.btn_wider.click()
     ts.win.btn_italic.click()
-    ts.win.btn_str_plus.click()
-    ts.win.btn_wt_plus.click()
+    ts.win.spin_stretch.setValue(130)
+    ts.win.spin_bold.setValue(3)
     b = first.block
-    assert (b.size, b.italic, b.stretch, b.bold) == (size + 0.5, True, 110, 1)
+    assert (b.italic, b.stretch, b.bold) == (True, 130, 3)
     assert block_state(second.block) == before_second
-    assert ts.win.btn_undo.isEnabled()
+    assert ts.doc.history_size == 1 + 3  # загрузка перевода + три правки
+
+
+def test_one_value_for_several_selected_blocks(loaded):
+    ts = loaded
+    ts.select(ts.items[0], ts.items[1])
+    ts.win.spin_bold.setValue(4)
+    assert [it.block.bold for it in ts.items] == [4, 4, 0, 0]
+
+
+def test_controls_show_selected_block_and_are_off_without_selection(loaded):
+    ts = loaded
+    ts.items[1].block.set_bold(5)
+    ts.items[1].block.set_stretch(150)
+    ts.items[1].block.set_italic(True)
+    ts.select(ts.items[1])
+    win = ts.win
+    assert (win.spin_bold.value(), win.spin_stretch.value(), win.btn_italic.isChecked()) == (5, 150, True)
+    assert ts.doc.history_size == 1  # показ значений не считается правкой
+    win.scene.clearSelection()
+    assert not any(w.isEnabled() for w in (win.spin_bold, win.spin_stretch, win.btn_italic,
+                                           win.btn_outline, win.btn_arch))
 
 
 def test_buttons_do_nothing_without_selection(loaded):
     ts = loaded
     before, history = ts.snapshot(), ts.doc.history_size
     ts.win.scene.clearSelection()
-    ts.win.btn_plus.click()
-    ts.win.btn_outline.click()
+    ts.win.toggle_selected_outline()
+    ts.win.set_bold(7)
     assert ts.snapshot() == before
     assert ts.doc.history_size == history
 
 
-def test_new_size_is_shown_on_canvas(loaded):
+def test_new_style_is_shown_on_canvas(loaded):
     ts = loaded
     item = ts.items[0]
     ts.select(item)
     before = item.text_rect().height()
-    ts.win.adjust_font(4)
-    assert item.text_rect().height() > before
+    ts.win.spin_stretch.setValue(200)
+    assert item.text_rect().height() > before  # колонка той же ширины, строк стало больше
+
+
+def test_toolbar_fits_full_hd_screen(typesetter):
+    assert typesetter.win.minimumSizeHint().width() <= 1400
+
+
+def test_strip_is_fitted_to_window_and_zoom_works(loaded):
+    win = loaded.win
+    win.resize(1320, 860)
+    win.show()
+    view = win.view
+    view.fit()
+    fitted = view.zoom_level
+    assert fitted < 1.0  # стрип 2229 px шире окна — уменьшен
+    vp = view.viewport().rect()
+    shown = view.mapToScene(vp).boundingRect()
+    assert shown.width() >= win.scene.sceneRect().width() - 1  # виден целиком по ширине
+    view.zoom(2)
+    assert not view.fit_mode and abs(view.zoom_level - 2 * fitted) < 1e-6
+    view.fit()
+    assert view.fit_mode and abs(view.zoom_level - fitted) < 1e-6
+    win.hide()
 
 
 def test_shadow_button_toggles_selected(loaded, tmp_path):
@@ -135,7 +175,7 @@ def test_undo_button_undoes_and_restores_selection(loaded):
     ts = loaded
     before = ts.snapshot()
     ts.select(ts.items[2])
-    ts.win.adjust_font(3)
+    ts.win.spin_bold.setValue(2)
     assert ts.win.shortcut_undo.key().toString() == "Ctrl+Z"
     ts.win.btn_undo.click()
     assert ts.snapshot() == before

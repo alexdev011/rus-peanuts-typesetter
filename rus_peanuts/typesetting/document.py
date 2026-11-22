@@ -41,21 +41,14 @@ class TextBlock:
     MAX_DRAG_SIZE = 72.0
     MIN_WIDTH = 45
 
-    def grow(self, delta: float) -> None:
-        self.size = max(self.MIN_SIZE, self.size + delta)
+    def set_stretch(self, value) -> None:
+        self.stretch = max(50, min(400, int(value)))
 
-    def widen(self, delta: float) -> None:
-        if self.is_reply:
-            self.width = max(self.MIN_WIDTH, self.width + delta)
+    def set_bold(self, value) -> None:
+        self.bold = max(0, min(10, int(value)))
 
-    def toggle_italic(self) -> None:
-        self.italic = not self.italic
-
-    def stretch_by(self, delta: int) -> None:
-        self.stretch = max(50, min(400, self.stretch + delta))
-
-    def thicken(self, delta: int) -> None:
-        self.bold = max(0, min(10, self.bold + (1 if delta > 0 else -1)))
+    def set_italic(self, on) -> None:
+        self.italic = bool(on)
 
     def toggle_shadow(self) -> None:
         """Кнопка «Shadow / Обычный»: у Реплики — Жирность 0 <-> 2, у Звука — Shadow <-> сплошной."""

@@ -16,12 +16,12 @@ def edited(doc):
     """Документ с типичными ручными правками: размер, курсив, Изгиб, Жирность, Ластик."""
     doc.open_strip(analysis.load_image(fixture_path("strips", "pe1963-04-12.png")),
                    translation.read(DATA / "pe1963-04-12_overflow.txt"))
-    doc.blocks[0].grow(3)
-    doc.blocks[0].toggle_italic()
+    doc.blocks[0].size += 3
+    doc.blocks[0].set_italic(True)
     doc.blocks[1].x += 40.5
     doc.blocks[2].set_text("ДРУГОЙ ТЕКСТ РЕПЛИКИ")
     doc.blocks[5].set_arch(-35)
-    doc.blocks[6].thicken(1)
+    doc.blocks[6].set_bold(1)
     doc.blocks[6].toggle_shadow()
     doc.erase_spot(100, 100)
     doc.remove([doc.blocks[3]])
@@ -106,7 +106,7 @@ def test_window_saves_and_opens_project(typesetter, tmp_path, monkeypatch):
 
     ts = typesetter.load_image(fixture_path("strips", "pe1963-04-08.png")).load_txt(DATA / "pe1963-04-08.txt")
     ts.select(ts.items[1])
-    ts.win.adjust_font(2)
+    ts.win.spin_bold.setValue(2)
     path = tmp_path / "проект.rpeanuts"
     monkeypatch.setattr(main_window.QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(path), "")))
     ts.win.act_save_project.trigger()

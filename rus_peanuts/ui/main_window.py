@@ -5,13 +5,13 @@ from PyQt6.QtCore import QProcess, QRectF, Qt
 from PyQt6.QtGui import QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QFileDialog, QGraphicsScene, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
-    QPushButton, QTabWidget, QVBoxLayout, QWidget,
+    QPushButton, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from rus_peanuts.export import psd
 from rus_peanuts.export.png import export_png
 from rus_peanuts.typesetting import analysis, project, translation
-from rus_peanuts.typesetting.document import Document
+from rus_peanuts.typesetting.document import Document, TextBlock
 from rus_peanuts.typesetting.layout import Typography
 
 from . import dialogs, embedded
@@ -41,6 +41,7 @@ class MainWindow(QMainWindow):
         self.orig_qpixmap = None
         self.pixmap_item = None
         self.items: list[BlockItem] = []
+        self._syncing = False
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -65,122 +66,46 @@ class MainWindow(QMainWindow):
         ts_layout = QVBoxLayout(self.tab_typesetter)
         ts_layout.setContentsMargins(0, 4, 0, 0)
 
-        #Панель управления
+        # Панель: файлы, отмена, вид выделенного текста, оригинал, справка
         bar = QHBoxLayout()
-
-        self.btn_img = QPushButton("1. Загрузить Стрип")
-        self.btn_img.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_img.clicked.connect(self.open_image_dialog)
-        bar.addWidget(self.btn_img)
-
-        self.btn_txt = QPushButton("2. Загрузить Перевод (.txt)")
-        self.btn_txt.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_txt.clicked.connect(self.open_txt_dialog)
-        bar.addWidget(self.btn_txt)
-
-        bar.addSpacing(8)
-
-        self.btn_undo = QPushButton("↩ Отменить (Ctrl+Z)")
-        self.btn_undo.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_img = self._button("1. Стрип", self.open_image_dialog, "Загрузить стрип (PNG, JPG)")
+        self.btn_txt = self._button("2. Перевод", self.open_txt_dialog, "Загрузить перевод (.txt)")
+        self.btn_undo = self._button("↩ Отменить", self.undo_action, "Отменить последнее действие (Ctrl+Z)")
         self.btn_undo.setEnabled(False)
-        self.btn_undo.clicked.connect(self.undo_action)
-        bar.addWidget(self.btn_undo)
+        for w in (self.btn_img, self.btn_txt, self.btn_undo):
+            bar.addWidget(w)
+        bar.addSpacing(16)
 
-        bar.addSpacing(8)
+        # Кегль и ширину колонки меняют маркеры на рамке блока (зелёный и синий квадратики)
+        self.spin_stretch = self._spin(50, 400, 10, " %", self.set_stretch, "Растяжение шрифта по ширине")
+        self.spin_bold = self._spin(0, 10, 1, "", self.set_bold, "Жирность: 0 — обычный, дальше толще")
+        self.btn_italic = self._button("Курсив", self.set_italic, "Курсив", checkable=True)
+        self.btn_outline = self._button("Shadow / Обычный", self.toggle_selected_outline,
+                                        "Для звуков: Shadow или сплошной шрифт. Для реплик: жирнее / обычный")
+        self.btn_arch = self._button("Изгиб", self.open_arch_dialog, "Изогнуть выделенный текст дугой вверх или вниз")
+        bar.addWidget(QLabel("Растяг"))
+        bar.addWidget(self.spin_stretch)
+        bar.addSpacing(6)
+        bar.addWidget(QLabel("Жирность"))
+        bar.addWidget(self.spin_bold)
+        bar.addSpacing(6)
+        for w in (self.btn_italic, self.btn_outline, self.btn_arch):
+            bar.addWidget(w)
+        bar.addStretch()
 
-        self.btn_plus = QPushButton("+ Текст")
-        self.btn_plus.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_plus.clicked.connect(lambda: self.adjust_font(0.5))
-        bar.addWidget(self.btn_plus)
-
-        self.btn_minus = QPushButton("− Текст")
-        self.btn_minus.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_minus.clicked.connect(lambda: self.adjust_font(-0.5))
-        bar.addWidget(self.btn_minus)
-
-        self.btn_wider = QPushButton("↔ Шире")
-        self.btn_wider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_wider.clicked.connect(lambda: self.adjust_width(10))
-        bar.addWidget(self.btn_wider)
-
-        self.btn_narrow = QPushButton(">< Уже")
-        self.btn_narrow.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_narrow.clicked.connect(lambda: self.adjust_width(-10))
-        bar.addWidget(self.btn_narrow)
-
-        bar.addSpacing(8)
-
-        self.btn_italic = QPushButton("I Курсив")
-        self.btn_italic.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_italic.clicked.connect(self.toggle_italic)
-        bar.addWidget(self.btn_italic)
-
-        self.btn_str_plus = QPushButton("+ Растяг")
-        self.btn_str_plus.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_str_plus.clicked.connect(lambda: self.adjust_stretch(10))
-        bar.addWidget(self.btn_str_plus)
-
-        self.btn_str_minus = QPushButton("- Растяг")
-        self.btn_str_minus.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_str_minus.clicked.connect(lambda: self.adjust_stretch(-10))
-        bar.addWidget(self.btn_str_minus)
-
-        self.btn_wt_plus = QPushButton("+ Жирность")
-        self.btn_wt_plus.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_wt_plus.clicked.connect(lambda: self.adjust_weight(1))
-        bar.addWidget(self.btn_wt_plus)
-
-        self.btn_wt_minus = QPushButton("- Жирность")
-        self.btn_wt_minus.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_wt_minus.clicked.connect(lambda: self.adjust_weight(-1))
-        bar.addWidget(self.btn_wt_minus)
-
-        self.btn_outline = QPushButton("Shadow / Обычный")
-        self.btn_outline.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_outline.setToolTip("Для эмоций: переключить Shadow / MPMangaFont-Bold. Для реплик: сделать текст жирнее")
-        self.btn_outline.clicked.connect(self.toggle_selected_outline)
-        bar.addWidget(self.btn_outline)
-
-        self.btn_arch = QPushButton("Изгиб текста")
-        self.btn_arch.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_arch.setToolTip("Изогнуть выделенный текст дугой вверх или вниз")
-        self.btn_arch.clicked.connect(self.open_arch_dialog)
-        bar.addWidget(self.btn_arch)
-
-        bar.addSpacing(8)
-
-        self.btn_save = QPushButton("Сохранить (PNG)")
-        self.btn_save.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_save.clicked.connect(self.save_result)
-        bar.addWidget(self.btn_save)
-
-        bar.addSpacing(12)
-
-        self.btn_orig = QPushButton("Показать оригинал")
-        self.btn_orig.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_orig.setCheckable(True)
-        self.btn_orig.clicked.connect(self.toggle_original)
+        self.btn_orig = self._button("Показать оригинал", self.toggle_original, "Сверить с английским оригиналом",
+                                     checkable=True)
+        self.btn_guide = self._button("Руководство", self.show_guide)
         bar.addWidget(self.btn_orig)
-        
-        self.btn_guide = QPushButton("Руководство")
-        self.btn_guide.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_guide.clicked.connect(self.show_guide)
         bar.addWidget(self.btn_guide)
-
-        self.btn_about = QPushButton("О нас")
-        self.btn_about.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_about.clicked.connect(self.show_about)
-        bar.addWidget(self.btn_about)
-
         ts_layout.addLayout(bar)
 
-        self.lbl_status = QLabel(
-            "Добро Пожаловать!"
-        )
-        self.lbl_status.setStyleSheet("color: #333; font-weight: bold; font-size: 12px;")
+        self.lbl_status = QLabel("Добро Пожаловать!")
+        self.lbl_status.setStyleSheet("font-weight: bold; font-size: 12px;")
         ts_layout.addWidget(self.lbl_status)
 
         self.scene = QGraphicsScene(self)
+        self.scene.selectionChanged.connect(self.sync_style_controls)
         self.view = StripCanvasView(self.scene, self)
         ts_layout.addWidget(self.view)
 
@@ -190,10 +115,30 @@ class MainWindow(QMainWindow):
 
         self.shortcut_undo = QShortcut(QKeySequence("Ctrl+Z"), self)
         self.shortcut_undo.activated.connect(self.undo_action)
-        self.init_file_menu()
+        self.init_menus()
+        self.sync_style_controls()
 
-    def init_file_menu(self):
-        """Меню «Файл»: проект и экспорт (панель кнопок и так во всю ширину экрана)."""
+    def _button(self, text, slot, tip=None, checkable=False) -> QPushButton:
+        btn = QPushButton(text)
+        btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        btn.setCheckable(checkable)
+        if tip:
+            btn.setToolTip(tip)
+        btn.clicked.connect(slot)
+        return btn
+
+    def _spin(self, low, high, step, suffix, slot, tip) -> QSpinBox:
+        spin = QSpinBox()
+        spin.setRange(low, high)
+        spin.setSingleStep(step)
+        spin.setSuffix(suffix)
+        spin.setToolTip(tip)
+        spin.setKeyboardTracking(False)  # число применяется по Enter, а не на каждую цифру
+        spin.valueChanged.connect(slot)
+        return spin
+
+    def init_menus(self):
+        """Меню: файлы и экспорт, масштаб холста, справка."""
         menu = self.menuBar().addMenu("Файл")
         menu.addAction("Загрузить стрип…", self.open_image_dialog)
         menu.addAction("Загрузить перевод (.txt)…", self.open_txt_dialog)
@@ -201,9 +146,18 @@ class MainWindow(QMainWindow):
         self.act_open_project = menu.addAction("Открыть проект…", QKeySequence("Ctrl+O"), self.open_project_dialog)
         self.act_save_project = menu.addAction("Сохранить проект…", QKeySequence("Ctrl+S"), self.save_project)
         menu.addSeparator()
-        menu.addAction("Сохранить PNG…", self.save_result)
+        self.act_save_png = menu.addAction("Сохранить PNG…", QKeySequence("Ctrl+Shift+S"), self.save_result)
         self.act_export_psd = menu.addAction("Экспорт в PSD (через Фотошоп)…", self.export_psd)
         self.act_export_psd.setStatusTip("PSD с настоящими текстовыми слоями — его соберёт Фотошоп")
+
+        view = self.menuBar().addMenu("Вид")
+        view.addAction("Вписать стрип в окно", QKeySequence("Ctrl+0"), self.view.fit)
+        view.addAction("Крупнее", QKeySequence("Ctrl+="), lambda: self.view.zoom(1.25))
+        view.addAction("Мельче", QKeySequence("Ctrl+-"), lambda: self.view.zoom(0.8))
+
+        help_menu = self.menuBar().addMenu("Справка")
+        help_menu.addAction("Руководство", self.show_guide)
+        help_menu.addAction("О нас", self.show_about)
 
     def init_fixed_logo(self):
         pix_logo = embedded.pixmap(embedded.EMBEDDED_LOGO_B64)
@@ -232,6 +186,9 @@ class MainWindow(QMainWindow):
             item.setSelected(i in selected)
             self.items.append(item)
         self.update_undo_button()
+        self.sync_style_controls()
+        if self.view.fit_mode:
+            self.view.fit()
 
     def selected_items(self) -> list[BlockItem]:
         return [it for it in self.scene.selectedItems() if isinstance(it, BlockItem)]
@@ -292,6 +249,7 @@ class MainWindow(QMainWindow):
         self.document.open_strip(img, lines)
         self.strip_name = os.path.splitext(os.path.basename(path))[0]
         self.orig_qpixmap = None
+        self.view.fit_mode = True
         self.rebuild_scene()
         self._show_counts()
 
@@ -325,23 +283,43 @@ class MainWindow(QMainWindow):
                 change(item.block)
                 item.refresh()
 
-    def adjust_font(self, delta):
-        self._edit_selected(lambda b: b.grow(delta))
+    def _set_on_selected(self, attr, value, setter):
+        """Задать значение выделенным блокам (без записи в историю, если менять нечего)."""
+        if self._syncing:
+            return
+        items = self.selected_items()
+        if items and any(getattr(it.block, attr) != value for it in items):
+            self._edit_selected(lambda b: setter(b, value))
 
-    def adjust_width(self, delta):
-        self._edit_selected(lambda b: b.widen(delta))
+    def set_stretch(self, value):
+        self._set_on_selected("stretch", value, TextBlock.set_stretch)
 
-    def toggle_italic(self):
-        self._edit_selected(lambda b: b.toggle_italic())
+    def set_bold(self, value):
+        self._set_on_selected("bold", value, TextBlock.set_bold)
 
-    def adjust_stretch(self, delta):
-        self._edit_selected(lambda b: b.stretch_by(delta))
+    def set_italic(self, checked):
+        self._set_on_selected("italic", bool(checked), TextBlock.set_italic)
 
-    def adjust_weight(self, delta):
-        self._edit_selected(lambda b: b.thicken(delta))
+    def sync_style_controls(self):
+        """Счётчики и «Курсив» показывают вид первого выделенного блока."""
+        items = self.selected_items()
+        self._syncing = True
+        try:
+            for w in (self.spin_stretch, self.spin_bold, self.btn_italic, self.btn_outline, self.btn_arch):
+                w.setEnabled(bool(items))
+            if items:
+                b = items[0].block
+                self.spin_stretch.setValue(b.stretch)
+                self.spin_bold.setValue(b.bold)
+                self.btn_italic.setChecked(b.italic)
+            else:
+                self.btn_italic.setChecked(False)
+        finally:
+            self._syncing = False
 
     def toggle_selected_outline(self):
         self._edit_selected(lambda b: b.toggle_shadow())
+        self.sync_style_controls()  # у Реплики кнопка меняет Жирность
 
     def open_arch_dialog(self):
         items = self.selected_items()
@@ -426,6 +404,7 @@ class MainWindow(QMainWindow):
         self.current_txt_path = None  # Перевод уже внутри проекта
         self.strip_name = os.path.splitext(os.path.basename(path))[0]
         self.orig_qpixmap = None
+        self.view.fit_mode = True
         self.rebuild_scene()
         self.lbl_status.setText(f"Проект открыт: {os.path.basename(path)} | Текстовых блоков: {len(doc.blocks)}.")
 
