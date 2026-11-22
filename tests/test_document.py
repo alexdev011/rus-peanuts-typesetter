@@ -86,7 +86,7 @@ def test_editing_reply_text_rehyphenates():
 # ------------------------------------------------- расстановка по местам
 
 def test_replies_fill_bubbles_in_reading_order(doc):
-    doc.open_strip(strip("pe1963-04-08"), translation.read(DATA / "pe1963-04-08.txt"))
+    doc.open_strip(strip("pe1963-04-08"), translation.read(DATA / "pe1963-04-08.txt").only())
     replies = [b for b in doc.blocks if b.is_reply]
     for b, box in zip(replies, doc.bubbles):
         assert inside(center(doc, b), box)
@@ -94,7 +94,7 @@ def test_replies_fill_bubbles_in_reading_order(doc):
 
 def test_extra_reply_goes_to_fallback_row(doc):
     """В 04-12 найдено 4 Бабла, а Реплик 5: пятая встаёт в запасной ряд вверху слева."""
-    doc.open_strip(strip("pe1963-04-12"), translation.read(DATA / "pe1963-04-12_overflow.txt"))
+    doc.open_strip(strip("pe1963-04-12"), translation.read(DATA / "pe1963-04-12_overflow.txt").only())
     assert len(doc.bubbles) == 4
     replies = [b for b in doc.blocks if b.is_reply]
     assert inside(center(doc, replies[4]), fallback(0))
@@ -133,10 +133,10 @@ def test_arch_is_read_from_letter_centres():
 
 def test_translation_before_or_after_image_gives_same_blocks(typography):
     a, b = Document(typography), Document(typography)
-    a.set_translation(translation.read(DATA / "pe1963-04-08.txt"))
+    a.set_translation(translation.read(DATA / "pe1963-04-08.txt").only())
     a.open_strip(strip("pe1963-04-08"))
     b.open_strip(strip("pe1963-04-08"))
-    b.set_translation(translation.read(DATA / "pe1963-04-08.txt"))
+    b.set_translation(translation.read(DATA / "pe1963-04-08.txt").only())
     assert [block_state(x) for x in a.blocks] == [block_state(x) for x in b.blocks]
 
 
@@ -158,7 +158,7 @@ def test_image_without_translation_is_cleaned_with_no_blocks(doc):
 
 @pytest.fixture
 def loaded(doc):
-    doc.open_strip(strip("pe1963-04-08"), translation.read(DATA / "pe1963-04-08.txt"))
+    doc.open_strip(strip("pe1963-04-08"), translation.read(DATA / "pe1963-04-08.txt").only())
     return doc
 
 

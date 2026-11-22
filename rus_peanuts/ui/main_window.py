@@ -4,13 +4,15 @@ import os
 from PyQt6.QtCore import QProcess, QRectF, Qt, QUrl
 from PyQt6.QtGui import QDesktopServices, QFont, QIcon, QKeySequence, QPainter, QShortcut
 from PyQt6.QtWidgets import (
-    QButtonGroup, QComboBox, QFileDialog, QGraphicsScene, QHBoxLayout, QLabel, QMainWindow,
-    QMessageBox, QPushButton, QSizePolicy, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
+    QApplication, QButtonGroup, QComboBox, QFileDialog, QGraphicsScene, QHBoxLayout, QInputDialog, QLabel,
+    QListWidget, QMainWindow, QMenu, QMessageBox, QPushButton, QSizePolicy, QSpinBox, QSplitter, QTabWidget,
+    QVBoxLayout, QWidget,
 )
 
 from rus_peanuts.export import psd
 from rus_peanuts.export.png import export_png
 from rus_peanuts.typesetting import analysis, project, translation
+from rus_peanuts.typesetting.batch import IMAGE_EXTENSIONS, Batch, strip_date
 from rus_peanuts.typesetting.document import BLACK, WHITE, Document, TextBlock
 from rus_peanuts.typesetting.fonts import FONT_EXTENSIONS
 from rus_peanuts.typesetting.layout import Typography
@@ -37,9 +39,14 @@ class MainWindow(QMainWindow):
 
         self.typography = typography
         self.document = Document(typography)
-        self.current_txt_path = None
+        self.current_txt_path = None            # Файл перевода
         self.strip_name = "strip"
+        self.strip_path = None                  # Оригинал, открытый одним файлом
+        self.batch: Batch | None = None         # Пачка, если открыта папка
+        self.batch_index = -1
+        self.batch_problems = None
         self.psd_process = None
+        self.pick_note = ""                     # что не так с выбором Перевода для одного стрипа
         self.cleaned_pixmap = None
         self.orig_qpixmap = None
         self.pixmap_item = None
@@ -72,7 +79,11 @@ class MainWindow(QMainWindow):
 
         # Панель: файлы, отмена, вид выделенного текста (Шрифт и стиль), оригинал, справка
         bar = QHBoxLayout()
-        self.btn_img = self._button("1. Стрип", self.open_image_dialog, "Загрузить стрип (PNG, JPG)")
+        self.btn_img = self._button("1. Стрип", None, "Открыть один стрип или папку со стрипами (Пачку)")
+        img_menu = QMenu(self.btn_img)
+        img_menu.addAction("Файл…", self.open_image_dialog)
+        img_menu.addAction("Папка…", self.open_folder_dialog)
+        self.btn_img.setMenu(img_menu)
         self.btn_txt = self._button("2. Перевод", self.open_txt_dialog, "Загрузить перевод (.txt)")
         self.btn_undo = self._button("↩ Отменить", self.undo_action, "Отменить последнее действие (Ctrl+Z)")
         self.btn_undo.setEnabled(False)
@@ -146,7 +157,31 @@ class MainWindow(QMainWindow):
         self.scene = QGraphicsScene(self)
         self.scene.selectionChanged.connect(self.sync_style_controls)
         self.view = StripCanvasView(self.scene, self)
-        ts_layout.addWidget(self.view)
+
+        # Пачка: список стрипов слева от холста (виден, только когда открыта папка)
+        self.batch_panel = QWidget()
+        panel = QVBoxLayout(self.batch_panel)
+        panel.setContentsMargins(0, 0, 0, 0)
+        nav = QHBoxLayout()
+        self.btn_prev = self._button("◀", lambda: self.step_strip(-1), "Предыдущий стрип (Ctrl+PgUp)")
+        self.btn_next = self._button("▶", lambda: self.step_strip(1), "Следующий стрип (Ctrl+PgDown)")
+        self.lbl_batch = QLabel()
+        nav.addWidget(self.btn_prev)
+        nav.addWidget(self.lbl_batch, stretch=1)
+        nav.addWidget(self.btn_next)
+        panel.addLayout(nav)
+        self.list_strips = QListWidget()
+        self.list_strips.setToolTip("● — есть несохранённые правки, ✓ — сохранён")
+        self.list_strips.currentRowChanged.connect(self.show_strip)
+        panel.addWidget(self.list_strips)
+        self.batch_panel.setMinimumWidth(190)
+        self.batch_panel.hide()
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.addWidget(self.batch_panel)
+        splitter.addWidget(self.view)
+        splitter.setStretchFactor(1, 1)
+        splitter.setChildrenCollapsible(False)
+        ts_layout.addWidget(splitter, stretch=1)
         self.spin_brush.setValue(DEFAULT_BRUSH)
 
         self.tab_multitool = MultiToolQtTab(self)
@@ -155,6 +190,8 @@ class MainWindow(QMainWindow):
 
         self.shortcut_undo = QShortcut(QKeySequence("Ctrl+Z"), self)
         self.shortcut_undo.activated.connect(self.undo_action)
+        QShortcut(QKeySequence("Ctrl+PgDown"), self).activated.connect(lambda: self.step_strip(1))
+        QShortcut(QKeySequence("Ctrl+PgUp"), self).activated.connect(lambda: self.step_strip(-1))
         self.init_menus()
         self.refresh_font_list()
 
@@ -181,8 +218,9 @@ class MainWindow(QMainWindow):
     def init_menus(self):
         """Меню: файлы и экспорт, масштаб холста, справка."""
         menu = self.menuBar().addMenu("Файл")
-        menu.addAction("Загрузить стрип…", self.open_image_dialog)
-        menu.addAction("Загрузить перевод (.txt)…", self.open_txt_dialog)
+        menu.addAction("Открыть стрип…", self.open_image_dialog)
+        menu.addAction("Открыть папку стрипов (Пачку)…", self.open_folder_dialog)
+        menu.addAction("Загрузить файл перевода (.txt)…", self.open_txt_dialog)
         menu.addSeparator()
         self.act_open_project = menu.addAction("Открыть проект…", QKeySequence("Ctrl+O"), self.open_project_dialog)
         self.act_save_project = menu.addAction("Сохранить проект…", QKeySequence("Ctrl+S"), self.save_project)
@@ -190,6 +228,9 @@ class MainWindow(QMainWindow):
         self.act_save_png = menu.addAction("Сохранить PNG…", QKeySequence("Ctrl+Shift+S"), self.save_result)
         self.act_export_psd = menu.addAction("Экспорт в PSD (через Фотошоп)…", self.export_psd)
         self.act_export_psd.setStatusTip("PSD с настоящими текстовыми слоями — его соберёт Фотошоп")
+        menu.addSeparator()
+        self.act_save_all = menu.addAction("Сохранить всю Пачку (PNG и проекты)…", self.save_all)
+        self.act_save_all.setEnabled(False)
 
         view = self.menuBar().addMenu("Вид")
         view.addAction("Вписать стрип в окно", QKeySequence("Ctrl+0"), self.view.fit)
@@ -242,10 +283,12 @@ class MainWindow(QMainWindow):
         selected = [i for i, it in enumerate(self.items) if it.isSelected()]
         self.document.checkpoint(selected)
         self.update_undo_button()
+        self.refresh_strip_list()
 
     def drop_checkpoint(self):
         self.document.drop_checkpoint()
         self.update_undo_button()
+        self.refresh_strip_list()
 
     def update_undo_button(self):
         self.btn_undo.setEnabled(self.document.can_undo)
@@ -255,6 +298,7 @@ class MainWindow(QMainWindow):
         if selected is None:
             return
         self.rebuild_scene(selected)
+        self.refresh_strip_list()
         self.lbl_status.setText("Действие отменено!")
 
     # ---------------------------------------------------- загрузка файлов
@@ -267,7 +311,9 @@ class MainWindow(QMainWindow):
         for url in event.mimeData().urls():
             path = url.toLocalFile()
             ext = os.path.splitext(path)[1].lower()
-            if ext in [".png", ".jpg", ".jpeg"]:
+            if os.path.isdir(path):
+                self.open_folder(path)
+            elif ext in IMAGE_EXTENSIONS:
                 self.load_image(path)
             elif ext == ".txt":
                 self.load_txt(path)
@@ -282,41 +328,111 @@ class MainWindow(QMainWindow):
             self.load_image(f)
 
     def open_txt_dialog(self):
-        f, _ = QFileDialog.getOpenFileName(self, "Выбрать перевод", "", "Текст (*.txt)")
+        f, _ = QFileDialog.getOpenFileName(self, "Выбрать файл перевода", "", "Текст (*.txt)")
         if f:
             self.load_txt(f)
 
+    def open_folder_dialog(self):
+        folder = QFileDialog.getExistingDirectory(self, "Папка со стрипами")
+        if folder:
+            self.open_folder(folder)
+
+    def _pick_lines(self, tf, date):
+        """Перевод для одного стрипа из Файла перевода: по дате, а без даты — спросить.
+        Заметку для строки состояния кладёт в `self.pick_note`."""
+        self.pick_note = ""
+        if tf is None:
+            return None
+        if tf.undated is not None or (date is None and len(tf.dates) == 1):
+            return tf.only()
+        if date is None:
+            date, ok = QInputDialog.getItem(self, "Какой Перевод взять",
+                                            "В имени стрипа нет даты. Выберите дату из файла перевода:",
+                                            tf.dates, 0, False)
+            if not ok or not date:
+                return None
+        lines = tf.for_date(date)
+        if lines is None and len(tf.dates) == 1:
+            # один стрип и один Перевод — путать нечего, но дата не сходится: возможно, опечатка
+            self.pick_note = f"В файле перевода дата {tf.dates[0]}, а у стрипа {date} — взят единственный Перевод. "
+            return tf.only()
+        if lines is None:
+            self.pick_note = f"В файле перевода нет Перевода на {date}. "
+        return lines
+
     def load_image(self, path):
+        if not self._leave_batch():
+            return
         img = analysis.load_image(path)
         if img is None:
             QMessageBox.critical(self, "Ошибка", "Не удалось открыть изображение.")
             return
         # Перевод перечитывается с диска: если файл поправили, подхватятся изменения
-        lines = translation.read(self.current_txt_path) if self.current_txt_path else None
-        self.document.open_strip(img, lines)
+        tf = translation.read(self.current_txt_path) if self.current_txt_path else None
+        self.document = Document(self.typography)
+        self.document.open_strip(img, self._pick_lines(tf, strip_date(path)))
+        self.strip_path = path
         self.strip_name = os.path.splitext(os.path.basename(path))[0]
-        self.orig_qpixmap = None
-        self.view.fit_mode = True
-        self.rebuild_scene()
-        self._show_counts()
+        self._show_document()
 
     def load_txt(self, path):
+        tf = translation.read(path)
+        if tf is None:
+            QMessageBox.warning(self, "Перевод", "Не удалось прочитать файл перевода или он пустой.")
+            return
         self.current_txt_path = path
-        lines = translation.read(path)
+        if self.batch is not None:
+            self.batch.set_translation(path)
+            self.batch_problems = self.batch.problems()
+            strip = self.batch.strips[self.batch_index]
+            if strip.document is None:              # стрип не правили — собрать заново с новым Переводом
+                self.document = self.batch.open(self.batch_index)
+            else:
+                self.document.set_translation(self.batch.lines_for(strip, tf) or [])
+            self._show_document()
+            self._report_batch_problems()
+            return
+        if self.document.image is None and tf.only() is None:
+            self.lbl_status.setText(f"Файл перевода загружен: переводов {len(tf.dates)}. Теперь откройте стрип или папку.")
+            return
+        date = strip_date(self.strip_path) if self.strip_path else None
+        lines = self._pick_lines(tf, date)
         if lines is None:
+            if self.pick_note:
+                self.lbl_status.setText(self.pick_note)
             return
         self.document.set_translation(lines)
         self.rebuild_scene()
         self._show_counts()
 
+    def _show_document(self):
+        """Показать текущий Документ с нуля: новый стрип, стрип Пачки, открытый проект."""
+        if self.btn_orig.isChecked():
+            self.btn_orig.setChecked(False)
+            self.btn_orig.setText("Показать оригинал")
+        self.orig_qpixmap = None
+        self.view.fit_mode = True
+        self.rebuild_scene()
+        self._show_counts()
+        self.refresh_strip_list()
+
     def _show_counts(self):
         doc = self.document
+        prefix = self.pick_note if self.batch is None else ""
+        if self.batch is not None:
+            strip = self.batch.strips[self.batch_index]
+            prefix = f"{strip.name}: "
+            if strip.date is None:
+                prefix += "в имени нет даты, перевода нет. "
+            elif self.batch_problems and strip.name in self.batch_problems.no_translation:
+                prefix += f"нет Перевода на {strip.date}. "
         if doc.lines is None:
             self.lbl_status.setText(
-                f"Стрип очищен! Найдено баблов: {len(doc.bubbles)}, звуков: {len(doc.sounds)}."
+                prefix + f"Стрип очищен! Найдено баблов: {len(doc.bubbles)}, звуков: {len(doc.sounds)}."
             )
             return
-        text = f"Найдено баблов: {len(doc.bubbles)}, звуков: {len(doc.sounds)} | Расставлено фраз: {len(doc.lines)}."
+        text = prefix + (f"Найдено баблов: {len(doc.bubbles)}, звуков: {len(doc.sounds)}"
+                         f" | Расставлено фраз: {len(doc.lines)}.")
         undashed = translation.replies_without_dash(doc.lines)
         if undashed:
             names = ", ".join(f"«{ln.text[:20]}»" for ln in undashed[:2]) + (" …" if len(undashed) > 2 else "")
@@ -528,9 +644,10 @@ class MainWindow(QMainWindow):
         if self.document.image is None:
             return
         self.scene.clearSelection()
-        out, _ = QFileDialog.getSaveFileName(self, "Сохранить", "strip_done.png", "PNG (*.png)")
+        out, _ = QFileDialog.getSaveFileName(self, "Сохранить", self.strip_name + ".png", "PNG (*.png)")
         if out:
             export_png(self.document, self.typography, out)
+            self._mark_saved()
             QMessageBox.information(self, "Готово", "Стрип сохранен!")
 
     # ------------------------------------------------------------- проект
@@ -541,6 +658,8 @@ class MainWindow(QMainWindow):
             self.load_project(f)
 
     def load_project(self, path):
+        if not self._leave_batch():
+            return
         try:
             doc = project.load(path, self.typography)
         except (project.ProjectError, OSError) as e:
@@ -548,10 +667,9 @@ class MainWindow(QMainWindow):
             return
         self.document = doc
         self.current_txt_path = None  # Перевод уже внутри проекта
+        self.strip_path = None
         self.strip_name = os.path.splitext(os.path.basename(path))[0]
-        self.orig_qpixmap = None
-        self.view.fit_mode = True
-        self.rebuild_scene()
+        self._show_document()
         self.lbl_status.setText(f"Проект открыт: {os.path.basename(path)} | Текстовых блоков: {len(doc.blocks)}.")
 
     def save_project(self):
@@ -566,7 +684,145 @@ class MainWindow(QMainWindow):
         except (project.ProjectError, OSError) as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить проект:\n{e}")
             return
+        self._mark_saved()
         self.lbl_status.setText(f"Проект сохранён: {os.path.basename(out)}")
+
+    def _mark_saved(self):
+        self.document.mark_saved()
+        if self.batch is not None:
+            self.batch.strips[self.batch_index].saved = True
+        self.refresh_strip_list()
+
+    # ---------------------------------------------------------------- Пачка
+
+    def open_folder(self, folder):
+        if not self._leave_batch():
+            return
+        batch = Batch(folder, self.typography, self.current_txt_path)
+        if not batch.strips:
+            QMessageBox.warning(self, "Пачка", "В папке нет стрипов (PNG, JPG).")
+            return
+        self.batch = batch
+        self.batch_problems = batch.problems()
+        self.batch_index = -1
+        self.list_strips.blockSignals(True)
+        self.list_strips.clear()
+        self.list_strips.addItems([s.name for s in batch.strips])
+        self.list_strips.blockSignals(False)
+        self.batch_panel.show()
+        self.act_save_all.setEnabled(True)
+        self.list_strips.setCurrentRow(0)
+        self._report_batch_problems()
+
+    def show_strip(self, index):
+        """Перейти к стрипу Пачки (правки прежнего остаются в памяти)."""
+        if self.batch is None or index < 0 or index == self.batch_index:
+            return
+        if self.batch_index >= 0:
+            self.batch.leave(self.batch_index)
+        try:
+            doc = self.batch.open(index)
+        except OSError as e:
+            QMessageBox.critical(self, "Ошибка", str(e))
+            return
+        strip = self.batch.strips[index]
+        self.batch_index = index
+        self.document = doc
+        self.strip_path = str(strip.path)
+        self.strip_name = strip.name
+        self._show_document()
+
+    def step_strip(self, delta):
+        if self.batch is not None:
+            row = max(0, min(len(self.batch.strips) - 1, self.batch_index + delta))
+            self.list_strips.setCurrentRow(row)
+
+    def refresh_strip_list(self):
+        """Подписи в списке Пачки: ● — есть несохранённые правки, ✓ — сохранён, ? — нет перевода."""
+        if self.batch is None:
+            return
+        missing = set(self.batch_problems.no_translation + self.batch_problems.no_date) if self.batch_problems else set()
+        for k, strip in enumerate(self.batch.strips):
+            mark = " ●" if strip.unsaved else (" ✓" if strip.saved else "")
+            if strip.name in missing:
+                mark += "  ? нет перевода"
+            item = self.list_strips.item(k)
+            if item is not None and item.text() != strip.name + mark:
+                item.setText(strip.name + mark)
+        self.lbl_batch.setText(f"{self.batch_index + 1} из {len(self.batch.strips)}")
+
+    def _report_batch_problems(self):
+        problems = self.batch_problems
+        if not problems:
+            return
+        parts = []
+        if not self.current_txt_path:
+            parts.append("Файл перевода ещё не загружен — кнопка «2. Перевод».")
+        else:
+            if problems.no_translation:
+                parts.append("Нет Перевода для: " + ", ".join(problems.no_translation))
+            if problems.no_strip:
+                parts.append("Переводы без стрипа: " + ", ".join(problems.no_strip))
+            if problems.duplicates:
+                parts.append("Дата встречается дважды (взят первый Перевод): " + ", ".join(problems.duplicates))
+        if problems.no_date:
+            parts.append("В имени нет даты (сначала Датировка в Multi tool): " + ", ".join(problems.no_date))
+        QMessageBox.information(self, "Пачка", "\n\n".join(parts))
+
+    def save_all(self):
+        if self.batch is None:
+            return
+        default = self.batch.folder / "result"
+        default.mkdir(exist_ok=True)
+        out = QFileDialog.getExistingDirectory(self, "Куда сохранить Пачку", str(default))
+        if not out:
+            if not any(default.iterdir()):
+                default.rmdir()
+            return
+        self.scene.clearSelection()
+
+        def log(message):
+            self.lbl_status.setText(message)
+            QApplication.processEvents()
+
+        errors = self.batch.save_all(out, log)
+        self.refresh_strip_list()
+        saved = len(self.batch.strips) - len(errors)
+        text = f"Сохранено стрипов: {saved} из {len(self.batch.strips)} (PNG и проекты) в {out}"
+        self.lbl_status.setText(text)
+        if errors:
+            QMessageBox.warning(self, "Пачка", text + "\n\nНе получилось:\n" + "\n".join(errors))
+        else:
+            QMessageBox.information(self, "Пачка", text)
+
+    def _leave_batch(self) -> bool:
+        """Закрыть Пачку (спросив про несохранённые стрипы). False — пользователь передумал."""
+        if self.batch is None:
+            return True
+        if not self._confirm_unsaved():
+            return False
+        self.batch = None
+        self.batch_index = -1
+        self.batch_problems = None
+        self.batch_panel.hide()
+        self.act_save_all.setEnabled(False)
+        return True
+
+    def _confirm_unsaved(self) -> bool:
+        unsaved = self.batch.unsaved() if self.batch is not None else []
+        if not unsaved:
+            return True
+        names = ", ".join(s.name for s in unsaved[:5]) + (" …" if len(unsaved) > 5 else "")
+        answer = QMessageBox.question(
+            self, "Несохранённые стрипы",
+            f"В Пачке есть несохранённые правки ({len(unsaved)}): {names}.\nЗакрыть без сохранения?")
+        return answer == QMessageBox.StandardButton.Yes
+
+    def closeEvent(self, event):
+        if self._confirm_unsaved():
+            event.accept()
+        else:
+            event.ignore()
 
     # ---------------------------------------------------------- экспорт PSD
 

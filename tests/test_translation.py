@@ -42,7 +42,7 @@ def test_dash_alone_is_skipped():
 
 def test_utf8_with_bom_is_read(tmp_path):
     """Блокнот сохраняет UTF-8 с невидимой меткой BOM в начале — первая строка не должна её получить."""
-    lines = translation.read(write(tmp_path, "\ufeff- Привет!\n- Пока!\n"))
+    lines = translation.read(write(tmp_path, "\ufeff- Привет!\n- Пока!\n")).only()
     assert [(ln.text, ln.is_reply, ln.dash) for ln in lines] == [("Привет!", True, True), ("Пока!", True, True)]
 
 
@@ -86,12 +86,12 @@ def test_all_leading_dashes_and_spaces_are_stripped():
 
 
 def test_windows_1251_file_is_read(tmp_path):
-    lines = translation.read(write(tmp_path, "- Привет!\nБАЦ!\n", encoding="cp1251"))
+    lines = translation.read(write(tmp_path, "- Привет!\nБАЦ!\n", encoding="cp1251")).only()
     assert [(ln.text, ln.is_reply) for ln in lines] == [("Привет!", True), ("БАЦ!", False)]
 
 
 def test_crlf_file_is_read(tmp_path):
-    lines = translation.read(write(tmp_path, "- Привет!\r\nБАЦ!\r\n"))
+    lines = translation.read(write(tmp_path, "- Привет!\r\nБАЦ!\r\n")).only()
     assert [(ln.text, ln.is_reply) for ln in lines] == [("Привет!", True), ("БАЦ!", False)]
 
 
@@ -100,4 +100,4 @@ def test_empty_file_gives_none(tmp_path):
 
 
 def test_file_with_only_comments_gives_empty_list(tmp_path):
-    assert translation.read(write(tmp_path, "1963-04-08\n* сноска\n")) == []
+    assert translation.read(write(tmp_path, "1963-04-08\n* сноска\n")).only() == []

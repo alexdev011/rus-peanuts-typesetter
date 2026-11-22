@@ -242,3 +242,6 @@ def no_modal_dialogs(monkeypatch):
         monkeypatch.setattr(QFileDialog, name, staticmethod(lambda *a, **k: ("", "")))
     monkeypatch.setattr(QFileDialog, "getOpenFileNames", staticmethod(lambda *a, **k: ([], "")))
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", staticmethod(lambda *a, **k: ""))
+    from PyQt6.QtWidgets import QInputDialog
+
+    monkeypatch.setattr(QInputDialog, "getItem", staticmethod(lambda *a, **k: ("", False)))

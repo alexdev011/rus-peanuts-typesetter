@@ -15,7 +15,7 @@ DATA = Path(__file__).parent / "data"
 def edited(doc):
     """Документ с типичными ручными правками: размер, курсив, Изгиб, Жирность, Шрифт, Карандаш."""
     doc.open_strip(analysis.load_image(fixture_path("strips", "pe1963-04-12.png")),
-                   translation.read(DATA / "pe1963-04-12_overflow.txt"))
+                   translation.read(DATA / "pe1963-04-12_overflow.txt").only())
     doc.blocks[0].size += 3
     doc.blocks[0].set_italic(True)
     doc.blocks[1].x += 40.5

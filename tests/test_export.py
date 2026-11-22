@@ -19,7 +19,7 @@ MOCK = Path(__file__).parent / "js" / "photoshop_mock.js"
 @pytest.fixture
 def loaded(doc):
     doc.open_strip(analysis.load_image(fixture_path("strips", "pe1963-04-08.png")),
-                   translation.read(DATA / "pe1963-04-08.txt"))
+                   translation.read(DATA / "pe1963-04-08.txt").only())
     return doc
 
 

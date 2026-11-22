@@ -101,6 +101,21 @@ class Document:
         self.erased_sounds: tuple = ()            # номера Звуков, стёртых под строками Перевода
         self.blocks: list[TextBlock] = []
         self._history: list = []
+        self._edits = 0                           # правок с открытия стрипа (для «не сохранено»)
+        self._saved_at = 0
+
+    @property
+    def edited(self) -> bool:
+        """Стрип правили руками (или загружали в него Перевод) после открытия."""
+        return self._edits > 0
+
+    @property
+    def dirty(self) -> bool:
+        """Есть правки, которые ещё не сохранены."""
+        return self._edits != self._saved_at
+
+    def mark_saved(self) -> None:
+        self._saved_at = self._edits
 
     # ------------------------------------------------------------ состояние
 
@@ -125,6 +140,7 @@ class Document:
         if lines is not None:
             self.lines = lines
         self._history.clear()
+        self._edits = self._saved_at = 0
         self._place()
 
     def set_translation(self, lines: list[Line]) -> None:
@@ -186,6 +202,7 @@ class Document:
             return
         self._history.append((self.pencil.copy(), copy.deepcopy(self.blocks), self.lines, self.erased_sounds,
                               tuple(selected)))
+        self._edits += 1
         if len(self._history) > HISTORY_LIMIT:
             self._history.pop(0)
 
@@ -193,6 +210,7 @@ class Document:
         """Отменяет последний checkpoint, если правка в итоге ничего не изменила."""
         if self._history:
             self._history.pop()
+            self._edits -= 1
 
     @property
     def can_undo(self) -> bool:
@@ -208,5 +226,6 @@ class Document:
         if not self._history:
             return None
         self.pencil, self.blocks, self.lines, self.erased_sounds, selected = self._history.pop()
+        self._edits += 1  # отмена — тоже изменение по сравнению с сохранённым
         self._render()
         return list(selected)
