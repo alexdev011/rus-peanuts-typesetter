@@ -1115,10 +1115,6 @@ class StripCanvasView(QGraphicsView):
 # ОРИГИНАЛЬНЫЙ КОД ВТОРОЙ ПРОГРАММЫ: Multi tool for Pinats by Alimtair (Wand / ImageMagick + Tkinter)
 
 import datetime
-import tkinter as tk
-from tkinter import *
-from tkinter import scrolledtext
-from tkinter import filedialog as fd
 try:
     from wand.image import Image as WandImage
 except ImportError:
@@ -1136,23 +1132,7 @@ class constants:
     GO_Y = 250
     W_GO_X = 400
     W_GO_Y = 250
-    SIGN_OLD_H = 15
-    SIGN_NEW_H = 18
-    SIGN_SPACE = 5
     WHITE_PIXEL = 'srgb(250,250,250)'
-
-
-class Singleton(object):
-    def __new__(cls, *args, **kwds):
-        it = cls.__dict__.get("__it__")
-        if it is not None:
-            return it
-        cls.__it__ = it = object.__new__(cls)
-        it.init(*args, **kwds)
-        return it
-
-    def init(self, *args, **kwds):
-        pass
 
 
 class Level:
@@ -1172,13 +1152,11 @@ class Level:
 
 
 class Start:
-    def __init__(self, path, folder, format, contrast, sign, operation, date, logger):
+    def __init__(self, path, folder, contrast, operation, date, logger):
         self.path = path
         self.folder = folder
-        self.format = format
         self.contrast = contrast
         self.operation = operation
-        self.sign = sign
         self.date = date
         self.log = logger
 
@@ -1205,8 +1183,6 @@ class Start:
                 operation = Operation(
                     command=self.operation,
                     file_name=self.path,
-                    format=self.format,
-                    sign=self.sign,
                     logger=self.log
                 )
                 operation.operr()
@@ -1221,8 +1197,6 @@ class Start:
                             img=self.edit_img,
                             command=self.operation,
                             file_name=self.file_name,
-                            format=self.format,
-                            sign=self.sign,
                             logger=self.log
                         )
                         operation.operr()
@@ -1235,8 +1209,6 @@ class Start:
                     img=self.edit_img,
                     command=self.operation,
                     file_name=self.file_name,
-                    format=self.format,
-                    sign=self.sign,
                     logger=self.log
                 )
                 operation.operr()
@@ -1247,12 +1219,10 @@ class Start:
 class Operation:
     cur_date = 'nothing'
 
-    def __init__(self, logger='none', img='none', command='none', file_name='none', format='none', sign='none'):
+    def __init__(self, logger='none', img='none', command='none', file_name='none'):
         self.edit_img = img
         self.command = command
         self.file_name = file_name
-        self.format = format
-        self.sign = sign
         self.log = logger
         if img != 'none':
             self.level = Level(self.edit_img)
@@ -1280,9 +1250,8 @@ class Operation:
             self.clone_2 = self.edit_img.clone()
             self.square()
         elif command == 'acomics':
-            if self.format:
-                self.clone_1 = self.edit_img.clone()
-                self.acomics()
+            self.clone_1 = self.edit_img.clone()
+            self.acomics()
         elif command == 'add_to_validation_list':
             self.add_to_validation_list()
         elif command == 'validate':
@@ -1373,38 +1342,12 @@ class Operation:
         res.composite(image=self.clone_1, left=5, top=0)
         self.img_save(to_save=res)
 
-    def add_sign(self, img='none'):
-        if self.format:
-            sign = WandImage(filename='sign.png')
-            sign_height = constants.SIGN_NEW_H
-        else:
-            sign = WandImage(filename='sign_old.png')
-            sign_height = constants.SIGN_OLD_H
-        self.level = Level(img)
-        self.inverted_sign = self.level.invert()
-        mark_x = int(img.width * 0.1)
-        mark_y = int(img.height * 0.3)
-        x, y = self.upper_left(inverte=self.inverted_sign, mark_x=mark_x, mark_y=mark_y)
-        if y < sign_height:
-            w = img.width
-            h = img.height
-            h += sign_height + constants.SIGN_SPACE
-            signed = WandImage(width=w, height=h, background='white')
-            signed.composite(image=img, left=0, top=constants.SIGN_SPACE + sign_height - y)
-            signed.composite(image=sign, left=x, top=constants.SIGN_SPACE)
-        else:
-            y -= sign_height
-            img.composite(sign, x, y)
-            signed = img
-        return signed
-
     def acomics(self):
         h = self.clone_1.height
         if h < 1000:
             self.clone_1.resize(constants.ACOM_X, constants.ACOM_Y)
         else:
             self.clone_1.resize(constants.ACOM_X, constants.ACOM_W_Y)
-        self.sign = False
         self.img_save(to_save=self.clone_1)
 
     def img_save(self, to_save, special_arg=False, i=False):
@@ -1414,8 +1357,6 @@ class Operation:
         else:
             self.save = self.file_name[:-4] + '.png'
         self.save = constants.RES + self.save
-        if self.sign:
-            to_save = self.add_sign(img=to_save)
         to_save.save(filename=self.save)
 
     def date(self):
@@ -1479,101 +1420,6 @@ class Operation:
         return str(date)
 
 
-class Window(Tk, Singleton):
-    """Оригинальное окно Multi tool for Pinats by Alimtair на Tkinter"""
-    def __init__(self):
-        super().__init__()
-        self.folder = BooleanVar(master=self, value=1)
-        self.radio = Radiobutton(self, text='Folder', variable=self.folder, value=1)
-        self.radio.place(x=50, y=20)
-        self.radio = Radiobutton(self, text='File', variable=self.folder, value=0)
-        self.radio.place(x=100, y=20)
-        self.path = Entry(self, width=50)
-        self.path.place(x=50, y=60)
-        self.button = Button(self, text='Browse', command=self.browse)
-        self.button.place(x=350, y=60)
-        self.label = Label(self, text='Decoration')
-        self.label.place(x=50, y=100)
-        self.contrast = IntVar(master=self, value=0)
-        self.sign = IntVar(master=self, value=0)
-        self.check = Checkbutton(self, text='contrast', variable=self.contrast)
-        self.check.place(x=50, y=120)
-        self.check = Checkbutton(self, text='sign', variable=self.sign)
-        self.check.place(x=50, y=140)
-        self.label = Label(self, text="Strip's format")
-        self.label.place(x=250, y=100)
-        self.format = BooleanVar(master=self, value=1)
-        self.radio = Radiobutton(self, text='new', variable=self.format, value=1)
-        self.radio.place(x=250, y=120)
-        self.radio = Radiobutton(self, text='old', variable=self.format, value=0)
-        self.radio.place(x=250, y=140)
-        self.label = Label(self, text='Operation')
-        self.label.place(x=50, y=160)
-        self.operation = StringVar(master=self, value='slice')
-        self.radio = Radiobutton(self, text='Slice', variable=self.operation, value='slice')
-        self.radio.place(x=50, y=180)
-        self.radio = Radiobutton(self, text='Date', variable=self.operation, value='date')
-        self.radio.place(x=50, y=200)
-        self.radio = Radiobutton(self, text='Square', variable=self.operation, value='square')
-        self.radio.place(x=50, y=220)
-        self.radio = Radiobutton(self, text='acomics', variable=self.operation, value='acomics')
-        self.radio.place(x=50, y=240)
-        self.radio = Radiobutton(self, text='add to validation list', variable=self.operation, value='add_to_validation_list')
-        self.radio.place(x=50, y=260)
-        self.radio = Radiobutton(self, text='validate', variable=self.operation, value='validate')
-        self.radio.place(x=50, y=280)
-        self.radio = Radiobutton(self, text='Nothing', variable=self.operation, value='nothing')
-        self.radio.place(x=50, y=300)
-        self.date = Entry(self, width=15)
-        self.date.insert(0, 'YYYY-MM-DD')
-        self.date.place(x=250, y=200)
-        self.label = Label(self, text='Date')
-        self.label.place(x=250, y=170)
-        self.label = Label(self, text='Output zone')
-        self.label.place(x=400, y=170)
-        self.output_box = scrolledtext.ScrolledText(self, width=50, height=10)
-        self.output_box.place(x=400, y=200)
-        self.button = Button(self, text='Go', command=self.go_Multi)
-        self.button.place(x=50, y=340)
-
-    def browse(self):
-        folder = self.folder.get()
-        if folder == 1:
-            cur_direktory = fd.askdirectory()
-            self.path.delete(first=0, last=END)
-            self.path.insert(0, cur_direktory)
-        elif folder == 0:
-            cur_file = fd.askopenfilename()
-            self.path.delete(first=0, last=END)
-            self.path.insert(0, cur_file)
-
-    def go_Multi(self):
-        go = Start(
-            path=self.path.get(),
-            folder=self.folder.get(),
-            format=self.format.get(),
-            contrast=self.contrast.get(),
-            sign=self.sign.get(),
-            operation=self.operation.get(),
-            date=self.date.get(),
-            logger=self.log
-        )
-        go.start_multi()
-
-    def log(self, message: str):
-        self.output_box.insert(END, message + '\n')
-        self.output_box.see(END)
-
-
-def launch_classic_tk_multitool():
-    """Запускает классическое окно Multi tool for Pinats by Alimtair один в один как в оригинале"""
-    Singleton.__it__ = None
-    handle = Window()
-    handle.title('Multi tool for Pinats by Alimtair')
-    handle.geometry('1000x500')
-    handle.mainloop()
-
-
 from PyQt6.QtWidgets import (
     QTabWidget, QLineEdit, QCheckBox, QRadioButton,
     QButtonGroup, QGroupBox, QTextEdit, QGridLayout
@@ -1620,28 +1466,14 @@ class MultiToolQtTab(QWidget):
         path_v.addLayout(browse_row)
         left_col.addWidget(path_box)
 
-        # 2. Decoration + Strip's format + Date
+        # 2. Decoration + Date
         opts_row = QHBoxLayout()
 
         dec_box = QGroupBox("Decoration")
         dec_v = QVBoxLayout(dec_box)
         self.chk_contrast = QCheckBox("contrast")
-        self.chk_sign = QCheckBox("sign")
         dec_v.addWidget(self.chk_contrast)
-        dec_v.addWidget(self.chk_sign)
         opts_row.addWidget(dec_box)
-
-        fmt_box = QGroupBox("Strip's format")
-        fmt_v = QVBoxLayout(fmt_box)
-        self.rb_new = QRadioButton("new")
-        self.rb_old = QRadioButton("old")
-        self.rb_new.setChecked(True)
-        self.fmt_group = QButtonGroup(self)
-        self.fmt_group.addButton(self.rb_new, 1)
-        self.fmt_group.addButton(self.rb_old, 0)
-        fmt_v.addWidget(self.rb_new)
-        fmt_v.addWidget(self.rb_old)
-        opts_row.addWidget(fmt_box)
 
         date_box = QGroupBox("Date")
         date_v = QVBoxLayout(date_box)
@@ -1674,16 +1506,12 @@ class MultiToolQtTab(QWidget):
             op_v.addWidget(rb)
         left_col.addWidget(op_box)
 
-        # 4. Go button + Classic Tkinter window launcher
+        # 4. Go button
         btn_row = QHBoxLayout()
         self.btn_go = QPushButton("Go")
         self.btn_go.setStyleSheet("font-weight: bold; padding: 8px 24px;")
         self.btn_go.clicked.connect(self.go_Multi)
         btn_row.addWidget(self.btn_go)
-
-        self.btn_classic_tk = QPushButton("Открыть в отдельном классическом окне (Tkinter)")
-        self.btn_classic_tk.clicked.connect(launch_classic_tk_multitool)
-        btn_row.addWidget(self.btn_classic_tk)
         btn_row.addStretch()
 
         left_col.addLayout(btn_row)
@@ -1723,9 +1551,7 @@ class MultiToolQtTab(QWidget):
         go = Start(
             path=self.edit_path.text(),
             folder=bool(self.rb_folder.isChecked()),
-            format=bool(self.rb_new.isChecked()),
             contrast=1 if self.chk_contrast.isChecked() else 0,
-            sign=1 if self.chk_sign.isChecked() else 0,
             operation=self.get_operation_value(),
             date=self.edit_date.text(),
             logger=self.log

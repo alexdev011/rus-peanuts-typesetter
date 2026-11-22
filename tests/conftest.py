@@ -202,9 +202,7 @@ class MultiTool:
         go = self.ct.Start(
             path=str(path).replace("\\", "/"),
             folder=folder,
-            format=True,
             contrast=1 if contrast else 0,
-            sign=0,
             operation=operation,
             date=date,
             logger=self.logs.append,
