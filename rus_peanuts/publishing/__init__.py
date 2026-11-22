@@ -21,6 +21,16 @@ OPERATIONS = {
     "nothing": "Nothing",
 }
 
+# Временно скрыты из интерфейса по просьбе команды; код и тесты остаются,
+# чтобы вернуть операцию, достаточно убрать её отсюда.
+HIDDEN_OPERATIONS = {"acomics", "add_to_validation_list", "validate"}
+
+
+def visible_operations() -> dict:
+    """Операции, которые показываются во вкладке, в порядке показа."""
+    return {op: title for op, title in OPERATIONS.items() if op not in HIDDEN_OPERATIONS}
+
+
 _NEEDS_PIXELS = {"slice", "date", "square", "acomics", "nothing"}
 
 

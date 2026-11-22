@@ -1084,7 +1084,7 @@ class MultiToolQtTab(QWidget):
         op_v = QVBoxLayout(op_box)
         self.op_group = QButtonGroup(self)
         self.op_radios = {}
-        for val, title in publishing.OPERATIONS.items():
+        for val, title in publishing.visible_operations().items():
             rb = QRadioButton(title)
             if val == "slice":
                 rb.setChecked(True)

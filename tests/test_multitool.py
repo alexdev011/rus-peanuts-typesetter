@@ -170,7 +170,12 @@ def test_go_button_runs_selected_operation(ct, typesetter, multitool):
     tab = typesetter.win.tab_multitool
     tab.rb_file.setChecked(True)
     tab.edit_path.setText(str(fixture_path("strips", "pe1963-04-08.png")).replace("\\", "/"))
-    next(rb for rb, op in tab.op_radios.items() if op == "acomics").setChecked(True)
+    next(rb for rb, op in tab.op_radios.items() if op == "square").setChecked(True)
     tab.btn_go.click()
     assert tab.output_box.toPlainText() == ""
-    assert [img.shape for img in multitool.results().values()] == [(223, 1024)]
+    assert [img.shape for img in multitool.results().values()] == [(958, 1103)]
+
+
+def test_acomics_and_validation_list_are_hidden_for_now(typesetter):
+    shown = set(typesetter.win.tab_multitool.op_radios.values())
+    assert shown == {"slice", "date", "square", "nothing"}
