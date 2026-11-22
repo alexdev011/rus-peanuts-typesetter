@@ -21,15 +21,24 @@ _UNIQUE_FAMILIES = {
 
 @dataclass(frozen=True)
 class Fonts:
-    """Имена семейств Qt для каждого шрифта вёрстки."""
+    """Имена семейств Qt для каждого шрифта вёрстки и их PostScript-имена для Фотошопа."""
     reply: str = "Comic Sans MS"
     sound: str = "Arial Black"
     sound_shadow: str = "Arial Black"
+    # Фотошоп выбирает шрифт по PostScript-имени; по умолчанию — как в PSD команды
+    reply_ps: str = "PeanutsRusbyme-Regular"
+    sound_ps: str = "MPMangaFontBold-Bold"
+    sound_shadow_ps: str = "MPMangaFontBold"
 
     def family(self, is_reply: bool, shadow: bool) -> str:
         if is_reply:
             return self.reply
         return self.sound_shadow if shadow else self.sound
+
+    def postscript(self, is_reply: bool, shadow: bool) -> str:
+        if is_reply:
+            return self.reply_ps
+        return self.sound_shadow_ps if shadow else self.sound_ps
 
 
 def default_search_dirs() -> list[str]:
@@ -56,11 +65,15 @@ def default_search_dirs() -> list[str]:
 def load_fonts(search_dirs=None) -> Fonts:
     """Находит и регистрирует шрифты в Qt. Нужен уже созданный QApplication."""
     found = {}
+    postscript = {}
 
     def register(key, filepath):
         try:
             with open(filepath, "rb") as f:
                 raw = f.read()
+            ps = postscript_name(raw)
+            if ps:
+                postscript[key] = ps
             fid = QFontDatabase.addApplicationFontFromData(QByteArray(rename_ttf_family(raw, _UNIQUE_FAMILIES[key])))
             if fid != -1:
                 fams = QFontDatabase.applicationFontFamilies(fid)
@@ -115,7 +128,42 @@ def load_fonts(search_dirs=None) -> Fonts:
         reply=found.get("reply", defaults.reply),
         sound=sound,
         sound_shadow=found.get("sound_shadow", sound),
+        reply_ps=postscript.get("reply", defaults.reply_ps),
+        sound_ps=postscript.get("sound", defaults.sound_ps),
+        sound_shadow_ps=postscript.get("sound_shadow", defaults.sound_shadow_ps),
     )
+
+
+def _tables(ttf_bytes: bytes) -> dict:
+    if len(ttf_bytes) < 12:
+        return {}
+    num_tables = struct.unpack(">H", ttf_bytes[4:6])[0]
+    tables = {}
+    for i in range(num_tables):
+        pos = 12 + 16 * i
+        tag = ttf_bytes[pos:pos + 4].decode("latin1")
+        offset, length = struct.unpack(">II", ttf_bytes[pos + 8:pos + 16])
+        tables[tag] = ttf_bytes[offset:offset + length]
+    return tables
+
+
+def postscript_name(ttf_bytes: bytes):
+    """PostScript-имя шрифта (запись 6 таблицы 'name') или None."""
+    try:
+        name = _tables(ttf_bytes).get("name")
+        if not name:
+            return None
+        count, string_offset = struct.unpack(">HH", name[2:6])
+        for r in range(count):
+            pid, eid, lid, nid, length, offset = struct.unpack(">HHHHHH", name[6 + 12 * r:18 + 12 * r])
+            if nid == 6:
+                raw = name[string_offset + offset:string_offset + offset + length]
+                text = raw.decode("utf-16-be", "ignore") if pid in (0, 3) else raw.decode("latin1")
+                if text:
+                    return text
+    except struct.error:
+        pass
+    return None
 
 
 def rename_ttf_family(ttf_bytes: bytes, new_family: str) -> bytes:

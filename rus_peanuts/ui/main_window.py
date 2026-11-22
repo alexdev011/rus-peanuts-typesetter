@@ -1,28 +1,28 @@
 """Главное окно: вкладка вёрстки (холст + панель кнопок) и вкладка Multi tool."""
 import os
 
-import cv2
-from PyQt6.QtCore import QRectF, Qt
-from PyQt6.QtGui import QIcon, QImage, QKeySequence, QPainter, QPixmap, QShortcut
+from PyQt6.QtCore import QProcess, QRectF, Qt
+from PyQt6.QtGui import QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QFileDialog, QGraphicsScene, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
     QPushButton, QTabWidget, QVBoxLayout, QWidget,
 )
 
-from rus_peanuts.typesetting import analysis, translation
+from rus_peanuts.export import psd
+from rus_peanuts.export.png import export_png
+from rus_peanuts.typesetting import analysis, project, translation
 from rus_peanuts.typesetting.document import Document
 from rus_peanuts.typesetting.layout import Typography
 
 from . import dialogs, embedded
+from rus_peanuts.typesetting.graphics import to_qpixmap
+
 from .block_item import BlockItem
 from .canvas import StripCanvasView
 from .multitool_tab import MultiToolQtTab
 
 
-def cv2_to_qpixmap(cv_img) -> QPixmap:
-    rgb = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
-    h, w, ch = rgb.shape
-    return QPixmap.fromImage(QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888).copy())
+cv2_to_qpixmap = to_qpixmap
 
 
 class MainWindow(QMainWindow):
@@ -35,6 +35,8 @@ class MainWindow(QMainWindow):
         self.typography = typography
         self.document = Document(typography)
         self.current_txt_path = None
+        self.strip_name = "strip"
+        self.psd_process = None
         self.cleaned_pixmap = None
         self.orig_qpixmap = None
         self.pixmap_item = None
@@ -188,6 +190,20 @@ class MainWindow(QMainWindow):
 
         self.shortcut_undo = QShortcut(QKeySequence("Ctrl+Z"), self)
         self.shortcut_undo.activated.connect(self.undo_action)
+        self.init_file_menu()
+
+    def init_file_menu(self):
+        """Меню «Файл»: проект и экспорт (панель кнопок и так во всю ширину экрана)."""
+        menu = self.menuBar().addMenu("Файл")
+        menu.addAction("Загрузить стрип…", self.open_image_dialog)
+        menu.addAction("Загрузить перевод (.txt)…", self.open_txt_dialog)
+        menu.addSeparator()
+        self.act_open_project = menu.addAction("Открыть проект…", QKeySequence("Ctrl+O"), self.open_project_dialog)
+        self.act_save_project = menu.addAction("Сохранить проект…", QKeySequence("Ctrl+S"), self.save_project)
+        menu.addSeparator()
+        menu.addAction("Сохранить PNG…", self.save_result)
+        self.act_export_psd = menu.addAction("Экспорт в PSD (через Фотошоп)…", self.export_psd)
+        self.act_export_psd.setStatusTip("PSD с настоящими текстовыми слоями — его соберёт Фотошоп")
 
     def init_fixed_logo(self):
         pix_logo = embedded.pixmap(embedded.EMBEDDED_LOGO_B64)
@@ -253,6 +269,8 @@ class MainWindow(QMainWindow):
                 self.load_image(path)
             elif ext == ".txt":
                 self.load_txt(path)
+            elif ext == project.EXTENSION:
+                self.load_project(path)
 
     def open_image_dialog(self):
         f, _ = QFileDialog.getOpenFileName(self, "Выбрать стрип", "", "Изображения (*.png *.jpg *.jpeg)")
@@ -272,6 +290,7 @@ class MainWindow(QMainWindow):
         # Перевод перечитывается с диска: если файл поправили, подхватятся изменения
         lines = translation.read(self.current_txt_path) if self.current_txt_path else None
         self.document.open_strip(img, lines)
+        self.strip_name = os.path.splitext(os.path.basename(path))[0]
         self.orig_qpixmap = None
         self.rebuild_scene()
         self._show_counts()
@@ -382,17 +401,88 @@ class MainWindow(QMainWindow):
         dialogs.show_about(self)
 
     def save_result(self):
-        if not self.cleaned_pixmap:
+        if self.document.image is None:
             return
         self.scene.clearSelection()
         out, _ = QFileDialog.getSaveFileName(self, "Сохранить", "strip_done.png", "PNG (*.png)")
         if out:
-            img = QImage(self.cleaned_pixmap.size(), QImage.Format.Format_ARGB32)
-            img.fill(Qt.GlobalColor.white)
-            painter = QPainter(img)
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-            painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
-            self.scene.render(painter)
-            painter.end()
-            img.save(out)
+            export_png(self.document, self.typography, out)
             QMessageBox.information(self, "Готово", "Стрип сохранен!")
+
+    # ------------------------------------------------------------- проект
+
+    def open_project_dialog(self):
+        f, _ = QFileDialog.getOpenFileName(self, "Открыть проект", "", f"Проект RUS PEANUTS (*{project.EXTENSION})")
+        if f:
+            self.load_project(f)
+
+    def load_project(self, path):
+        try:
+            doc = project.load(path, self.typography)
+        except (project.ProjectError, OSError) as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось открыть проект:\n{e}")
+            return
+        self.document = doc
+        self.current_txt_path = None  # Перевод уже внутри проекта
+        self.strip_name = os.path.splitext(os.path.basename(path))[0]
+        self.orig_qpixmap = None
+        self.rebuild_scene()
+        self.lbl_status.setText(f"Проект открыт: {os.path.basename(path)} | Текстовых блоков: {len(doc.blocks)}.")
+
+    def save_project(self):
+        if self.document.analysis is None:
+            return
+        out, _ = QFileDialog.getSaveFileName(self, "Сохранить проект", self.strip_name + project.EXTENSION,
+                                             f"Проект RUS PEANUTS (*{project.EXTENSION})")
+        if not out:
+            return
+        try:
+            project.save(self.document, out)
+        except (project.ProjectError, OSError) as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить проект:\n{e}")
+            return
+        self.lbl_status.setText(f"Проект сохранён: {os.path.basename(out)}")
+
+    # ---------------------------------------------------------- экспорт PSD
+
+    def export_psd(self):
+        if self.document.image is None or self.psd_process is not None:
+            return
+        out, _ = QFileDialog.getSaveFileName(self, "Экспорт в PSD", self.strip_name + ".psd", "Photoshop (*.psd)")
+        if not out:
+            return
+        self.scene.clearSelection()
+        try:
+            job = psd.prepare(self.document, self.typography, out)
+        except (ValueError, OSError) as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось подготовить PSD:\n{e}")
+            return
+        cmd = psd.photoshop_command(job)
+        proc = QProcess(self)
+        proc.finished.connect(lambda *_: self._psd_finished(job))
+        proc.errorOccurred.connect(lambda *_: self._psd_finished(job))
+        self.psd_process = proc
+        self.act_export_psd.setEnabled(False)
+        self.lbl_status.setText("Фотошоп собирает PSD… (первый запуск Фотошопа может занять минуту)")
+        proc.start(cmd[0], cmd[1:])
+
+    def _psd_finished(self, job):
+        if self.psd_process is None:
+            return
+        self.psd_process.deleteLater()
+        self.psd_process = None
+        self.act_export_psd.setEnabled(True)
+        ok, message = psd.result(job)
+        if ok:
+            self.lbl_status.setText(f"PSD сохранён: {job.psd_path.name}")
+            text = f"PSD сохранён:\n{job.psd_path}"
+            if message:
+                text += f"\n\nПредупреждения Фотошопа:\n{message}"
+            QMessageBox.information(self, "Готово", text)
+        else:
+            self.lbl_status.setText("PSD не собран")
+            QMessageBox.warning(
+                self, "PSD не собран",
+                f"{message}\n\nМожно собрать вручную: в Фотошопе Файл → Сценарии → Обзор… "
+                f"и выбрать файл\n{job.script}",
+            )

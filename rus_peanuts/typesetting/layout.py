@@ -3,17 +3,36 @@
 Один и тот же `Typography.style()` используется и для измерения (при расстановке),
 и для показа на холсте, поэтому размеры совпадают с тем, что видно на экране.
 """
+from dataclasses import dataclass
+
 from PyQt6.QtCore import QRectF, Qt
-from PyQt6.QtGui import QBrush, QColor, QFont, QPen, QTextCharFormat, QTextCursor
+from PyQt6.QtGui import QBrush, QColor, QFont, QFontMetricsF, QGuiApplication, QPen, QTextCharFormat, QTextCursor
 from PyQt6.QtWidgets import QGraphicsTextItem
 
 from .document import TextBlock
 from .fonts import Fonts
-from .hyphenation import hyphenate_text
+from .hyphenation import SOFT_HYPHEN, hyphenate_text
 from .translation import Line
 
 REPLY_START_SIZE = 11.0
 SOUND_START_SIZE = 28.0
+
+
+@dataclass(frozen=True)
+class SetLine:
+    """Строка текста так, как её разложил Qt (координаты — относительно блока)."""
+    text: str           # с дефисом на месте переноса, без мягких переносов
+    center_x: float
+    baseline_y: float
+    width: float        # ширина набранной строки
+
+
+@dataclass(frozen=True)
+class SetText:
+    """Разложенный текст блока: строки, кегль и интерлиньяж в пикселях стрипа."""
+    lines: list
+    size_px: float
+    leading_px: float
 
 
 class Typography:
@@ -74,6 +93,36 @@ class Typography:
         probe.setPlainText(block.text)
         self.style(probe, block)
         return probe.boundingRect()
+
+    def set_text(self, block: TextBlock) -> SetText:
+        """Строки блока с точными переносами Qt — для экспорта в другие программы."""
+        probe = QGraphicsTextItem()
+        probe.setPlainText(block.text)
+        self.style(probe, block)
+        lines = []
+        b = probe.document().begin()
+        while b.isValid():
+            layout, text, origin = b.layout(), b.text(), b.layout().position()
+            for i in range(layout.lineCount()):
+                ln = layout.lineAt(i)
+                s = text[ln.textStart():ln.textStart() + ln.textLength()].rstrip(" ")
+                if s.endswith(SOFT_HYPHEN):
+                    s = s[:-1] + "-"
+                lines.append(SetLine(
+                    text=s.replace(SOFT_HYPHEN, ""),
+                    center_x=origin.x() + ln.naturalTextRect().center().x(),
+                    baseline_y=origin.y() + ln.y() + ln.ascent(),
+                    width=ln.naturalTextWidth(),
+                ))
+            b = b.next()
+        font = probe.font()
+        screen = QGuiApplication.primaryScreen()
+        dpi = screen.logicalDotsPerInchY() if screen else 96.0
+        if len(lines) > 1:
+            leading = lines[1].baseline_y - lines[0].baseline_y
+        else:
+            leading = QFontMetricsF(font).lineSpacing()
+        return SetText(lines=lines, size_px=font.pointSizeF() * dpi / 72.0, leading_px=leading)
 
     def fit(self, line: Line, box) -> TextBlock:
         """Текстовый блок для строки Перевода, вписанный и отцентрованный в место на стрипе."""

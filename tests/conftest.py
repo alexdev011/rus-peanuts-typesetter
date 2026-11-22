@@ -229,3 +229,15 @@ class MultiTool:
 def multitool(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)  # Multi tool пишет result/ и 'validation list.txt' в текущую папку
     return MultiTool(tmp_path)
+
+
+@pytest.fixture(autouse=True)
+def no_modal_dialogs(monkeypatch):
+    """Страховка: модальное окно в тесте ждало бы клика вечно. Тест может переопределить."""
+    from PyQt6.QtWidgets import QFileDialog, QMessageBox
+
+    for name in ("information", "warning", "critical", "question"):
+        monkeypatch.setattr(QMessageBox, name, staticmethod(lambda *a, **k: None))
+    for name in ("getSaveFileName", "getOpenFileName"):
+        monkeypatch.setattr(QFileDialog, name, staticmethod(lambda *a, **k: ("", "")))
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", staticmethod(lambda *a, **k: ""))
