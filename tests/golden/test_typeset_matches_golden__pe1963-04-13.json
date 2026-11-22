@@ -1,0 +1,46 @@
+{
+ "status": "Найдено баблов: 1, SFX: 0 | Расставлено фраз: 3.",
+ "blocks": [
+  {
+   "text": "Я ДОМА!",
+   "is_bubble": false,
+   "is_outlined": true,
+   "x": 77.0,
+   "y": 56.5,
+   "size": 27.0,
+   "width": 160,
+   "stretch": 100,
+   "italic": false,
+   "bold": 0,
+   "arch": 0
+  },
+  {
+   "text": "КРЫСЬ­НЯ!",
+   "is_bubble": true,
+   "is_outlined": false,
+   "x": 1734.52,
+   "y": 55.5,
+   "size": 22.0,
+   "width": 454.96,
+   "stretch": 100,
+   "italic": false,
+   "bold": 0,
+   "arch": 0
+  },
+  {
+   "text": "НЕТ НИЧЕГО ХУЖЕ ЧЕМ ПРИ­ХО­ДИТЬ В ПУСТОЙ ДОМ!",
+   "is_bubble": true,
+   "is_outlined": false,
+   "x": 264.8,
+   "y": 47.0,
+   "size": 12.0,
+   "width": 150.4,
+   "stretch": 100,
+   "italic": false,
+   "bold": 0,
+   "arch": 0
+  }
+ ],
+ "cleaned": "3c7b3f0e6b200c3a",
+ "rendered": "65dcd78debaa26ba"
+}

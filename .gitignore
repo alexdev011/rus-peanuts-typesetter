@@ -24,3 +24,6 @@ validation list.txt
 *.swp
 Thumbs.db
 Desktop.ini
+# Тестовые образцы стрипов (защищены авторским правом, в репозиторий не попадают)
+tests/fixtures/
+.pytest_cache/
