@@ -1,7 +1,7 @@
 """Текстовый блок на холсте окна: вид из BlockGraphic плюс рамка, маркеры и мышь."""
-from PyQt6.QtCore import QPointF, QRectF, Qt
-from PyQt6.QtGui import QBrush, QColor, QPen
-from PyQt6.QtWidgets import QGraphicsItem, QGraphicsTextItem
+from qtpy.QtCore import QPointF, QRectF, Qt
+from qtpy.QtGui import QBrush, QColor, QPen
+from qtpy.QtWidgets import QGraphicsItem, QGraphicsTextItem
 
 from rus_peanuts.typesetting.document import TextBlock
 from rus_peanuts.typesetting.graphics import BlockGraphic

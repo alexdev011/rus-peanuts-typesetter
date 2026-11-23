@@ -20,6 +20,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
+from qtpy import QT5
 
 ROOT = Path(__file__).resolve().parent.parent
 TESTS = ROOT / "tests"
@@ -29,6 +30,13 @@ GOLDEN_IMG = FIXTURES / "golden"
 ACTUAL_IMG = FIXTURES / "_actual"
 UPDATE = os.environ.get("UPDATE_GOLDEN") == "1"
 
+# Эталоны вёрстки записаны на Qt 6 (шрифты через DirectWrite). Сборка для Windows 8.1 на Qt 5
+# меряет шрифты через GDI: высота строки округляется до пикселя, и автоподбор кегля местами
+# выбирает на 1–1,5 пт меньше. Точные эталоны вёрстки там не сравниваем.
+qt6_metrics = pytest.mark.skipif(
+    QT5, reason="эталоны вёрстки записаны на Qt 6; метрики шрифтов Qt 5 (GDI) отличаются",
+)
+
 sys.path.insert(0, str(ROOT))
 
 
@@ -36,8 +44,12 @@ sys.path.insert(0, str(ROOT))
 
 @pytest.fixture(scope="session")
 def qt_app():
-    from PyQt6.QtWidgets import QApplication
+    from qtpy.QtWidgets import QApplication
 
+    from rus_peanuts.ui.qt_setup import prepare_qt
+
+    if QApplication.instance() is None:
+        prepare_qt()
     return QApplication.instance() or QApplication([])
 
 
@@ -234,7 +246,7 @@ def multitool(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def no_modal_dialogs(monkeypatch):
     """Страховка: модальное окно в тесте ждало бы клика вечно. Тест может переопределить."""
-    from PyQt6.QtWidgets import QFileDialog, QMessageBox
+    from qtpy.QtWidgets import QFileDialog, QMessageBox
 
     for name in ("information", "warning", "critical", "question"):
         monkeypatch.setattr(QMessageBox, name, staticmethod(lambda *a, **k: None))
@@ -242,6 +254,6 @@ def no_modal_dialogs(monkeypatch):
         monkeypatch.setattr(QFileDialog, name, staticmethod(lambda *a, **k: ("", "")))
     monkeypatch.setattr(QFileDialog, "getOpenFileNames", staticmethod(lambda *a, **k: ([], "")))
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", staticmethod(lambda *a, **k: ""))
-    from PyQt6.QtWidgets import QInputDialog
+    from qtpy.QtWidgets import QInputDialog
 
     monkeypatch.setattr(QInputDialog, "getItem", staticmethod(lambda *a, **k: ("", False)))

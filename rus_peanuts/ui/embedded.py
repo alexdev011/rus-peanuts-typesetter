@@ -2,8 +2,8 @@
 
 Хранятся строками base64, чтобы сборка PyInstaller не требовала лишних файлов.
 """
-from PyQt6.QtCore import QByteArray
-from PyQt6.QtGui import QPixmap
+from qtpy.QtCore import QByteArray
+from qtpy.QtGui import QPixmap
 
 
 def pixmap(b64_str: str) -> QPixmap:

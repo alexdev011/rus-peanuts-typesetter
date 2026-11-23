@@ -1,9 +1,9 @@
 """Главное окно: вкладка вёрстки (холст + панель кнопок) и вкладка Multi tool."""
 import os
 
-from PyQt6.QtCore import QProcess, QRectF, Qt, QUrl
-from PyQt6.QtGui import QDesktopServices, QFont, QIcon, QKeySequence, QPainter, QShortcut
-from PyQt6.QtWidgets import (
+from qtpy.QtCore import QProcess, QRectF, Qt, QUrl
+from qtpy.QtGui import QDesktopServices, QFont, QIcon, QKeySequence, QPainter, QShortcut
+from qtpy.QtWidgets import (
     QApplication, QButtonGroup, QComboBox, QFileDialog, QGraphicsScene, QHBoxLayout, QInputDialog, QLabel,
     QListWidget, QMainWindow, QMenu, QMessageBox, QPushButton, QSizePolicy, QSpinBox, QSplitter, QTabWidget,
     QVBoxLayout, QWidget,
@@ -24,6 +24,7 @@ from rus_peanuts.typesetting.graphics import to_qpixmap
 from .block_item import BlockItem
 from .canvas import DEFAULT_BRUSH, StripCanvasView
 from .multitool_tab import MultiToolQtTab
+from .qt_setup import add_action
 
 
 cv2_to_qpixmap = to_qpixmap
@@ -222,10 +223,10 @@ class MainWindow(QMainWindow):
         menu.addAction("Открыть папку стрипов (Пачку)…", self.open_folder_dialog)
         menu.addAction("Загрузить файл перевода (.txt)…", self.open_txt_dialog)
         menu.addSeparator()
-        self.act_open_project = menu.addAction("Открыть проект…", QKeySequence("Ctrl+O"), self.open_project_dialog)
-        self.act_save_project = menu.addAction("Сохранить проект…", QKeySequence("Ctrl+S"), self.save_project)
+        self.act_open_project = add_action(menu, "Открыть проект…", self.open_project_dialog, "Ctrl+O")
+        self.act_save_project = add_action(menu, "Сохранить проект…", self.save_project, "Ctrl+S")
         menu.addSeparator()
-        self.act_save_png = menu.addAction("Сохранить PNG…", QKeySequence("Ctrl+Shift+S"), self.save_result)
+        self.act_save_png = add_action(menu, "Сохранить PNG…", self.save_result, "Ctrl+Shift+S")
         self.act_export_psd = menu.addAction("Экспорт в PSD (через Фотошоп)…", self.export_psd)
         self.act_export_psd.setStatusTip("PSD с настоящими текстовыми слоями — его соберёт Фотошоп")
         menu.addSeparator()
@@ -233,9 +234,9 @@ class MainWindow(QMainWindow):
         self.act_save_all.setEnabled(False)
 
         view = self.menuBar().addMenu("Вид")
-        view.addAction("Вписать стрип в окно", QKeySequence("Ctrl+0"), self.view.fit)
-        view.addAction("Крупнее", QKeySequence("Ctrl+="), lambda: self.view.zoom(1.25))
-        view.addAction("Мельче", QKeySequence("Ctrl+-"), lambda: self.view.zoom(0.8))
+        add_action(view, "Вписать стрип в окно", self.view.fit, "Ctrl+0")
+        add_action(view, "Крупнее", lambda: self.view.zoom(1.25), "Ctrl+=")
+        add_action(view, "Мельче", lambda: self.view.zoom(0.8), "Ctrl+-")
 
         fonts_menu = self.menuBar().addMenu("Шрифты")
         self.act_add_fonts = fonts_menu.addAction("Добавить шрифты…", self.add_fonts_dialog)

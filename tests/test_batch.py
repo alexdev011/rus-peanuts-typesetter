@@ -202,7 +202,7 @@ def test_leaving_batch_with_unsaved_edits_asks(window_batch, monkeypatch):
 
 
 def test_closing_with_unsaved_edits_can_be_cancelled(window_batch, monkeypatch):
-    from PyQt6.QtGui import QCloseEvent
+    from qtpy.QtGui import QCloseEvent
     from rus_peanuts.ui import main_window
 
     win = window_batch.win

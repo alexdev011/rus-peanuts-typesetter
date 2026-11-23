@@ -1,5 +1,5 @@
 """Вкладка «Multi tool»: подготовка стрипов к публикации (rus_peanuts.publishing)."""
-from PyQt6.QtWidgets import (
+from qtpy.QtWidgets import (
     QButtonGroup, QCheckBox, QFileDialog, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QRadioButton, QTextEdit, QVBoxLayout, QWidget,
 )

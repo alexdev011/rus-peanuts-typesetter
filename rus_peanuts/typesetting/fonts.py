@@ -14,8 +14,8 @@ import struct
 import sys
 from dataclasses import dataclass
 
-from PyQt6.QtCore import QByteArray
-from PyQt6.QtGui import QFontDatabase
+from qtpy.QtCore import QByteArray
+from qtpy.QtGui import QFontDatabase
 
 # Шрифт реплик: им по умолчанию набирается каждый новый Текстовый блок
 DEFAULT_FONT = "PeanutsRusbyme-Regular"
@@ -180,9 +180,12 @@ def rename_ttf_family(ttf_bytes: bytes, new_family: str) -> bytes:
         return ttf_bytes
 
     ps_name = "".join(ch for ch in new_family if ch.isalnum() or ch in "-_")
+    # Запись 3 (уникальный идентификатор) обязательна для GDI: без неё Windows не принимает шрифт
+    # из памяти, а GDI — движок шрифтов Qt 5 и Qt 6 до 6.8 (позже Qt берёт DirectWrite, ему всё равно).
     entries_spec = [
         (1, new_family),
         (2, "Regular"),
+        (3, new_family),
         (4, new_family),
         (6, ps_name),
         (16, new_family),

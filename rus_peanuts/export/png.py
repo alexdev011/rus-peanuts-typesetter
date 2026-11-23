@@ -1,5 +1,5 @@
 """Экспорт Результата в PNG: очищенный стрип с наложенными Текстовыми блоками."""
-from PyQt6.QtCore import QSize
+from qtpy.QtCore import QSize
 
 from rus_peanuts.typesetting.document import Document
 from rus_peanuts.typesetting.graphics import build_scene, render_scene

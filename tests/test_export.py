@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import fixture_path
+from conftest import fixture_path, qt6_metrics
 from rus_peanuts.export import psd
 from rus_peanuts.export.png import export_png
 from rus_peanuts.typesetting import analysis, translation
@@ -39,6 +39,7 @@ def test_png_has_strip_size(loaded, tmp_path):
 
 # --------------------------------------------------------- слои для Фотошопа
 
+@qt6_metrics
 def test_text_layer_keeps_program_line_breaks(loaded):
     layer = psd.text_layer(loaded.blocks[0], loaded.typography)
     assert layer.contents.split("\r") == [
@@ -195,7 +196,7 @@ def test_window_psd_button_runs_job_and_reports(typesetter, tmp_path, monkeypatc
     """Кнопка «Экспорт в PSD»: готовит задание и ждёт процесс; вместо Фотошопа — заглушка."""
     import sys
 
-    from PyQt6.QtTest import QTest
+    from qtpy.QtTest import QTest
     from rus_peanuts.ui import main_window
 
     ts = typesetter.load_image(fixture_path("strips", "pe1963-04-08.png")).load_txt(DATA / "pe1963-04-08.txt")

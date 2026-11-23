@@ -1,6 +1,6 @@
 """Окна «Руководство», «О нас» и «Изгиб текста»."""
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QSlider, QVBoxLayout
+from qtpy.QtCore import Qt
+from qtpy.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QSlider, QVBoxLayout
 
 from . import embedded
 

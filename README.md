@@ -80,7 +80,7 @@
 ├── rus_peanuts/
 │   ├── typesetting/           # Вёрстка: анализ стрипа, Документ, раскладка текста, шрифты
 │   ├── publishing/            # Multi tool: Нарезка, Квадрат, Датировка (numpy/Pillow)
-│   ├── ui/                    # Окно на PyQt6
+│   ├── ui/                    # Окно на Qt: PyQt6 (или PyQt5 для Windows 8.1) через qtpy
 │   ├── app.py                 # Запуск приложения
 │   └── bootstrap.py           # Проверка зависимостей
 ├── fonts/                     # Набор шрифтов: сюда же копируются добавленные шрифты
@@ -91,6 +91,7 @@
 ├── docs/adr/                  # Архитектурные решения
 ├── GLOSSARY.md                # Словарь терминов проекта
 ├── requirements.txt           # Зависимости
+├── requirements-legacy.txt    # Зависимости сборки для Windows 8.1
 └── requirements-dev.txt       # Зависимости для тестов
 ```
 
@@ -108,7 +109,7 @@ python -m pytest
 
 ### Требования
 * Python 3.10+
-* Windows 10/11 (рекомендуется)
+* Windows 10/11 (для Windows 8.1 есть отдельная сборка, см. ниже)
 * Для экспорта в PSD: Adobe Photoshop CC 2019 или новее, и все шрифты, которыми набран стрип, должны быть **установлены в Windows** — Фотошоп берёт шрифты из системы, а не из папки программы (если шрифта нет, Фотошоп подставит свой и программа об этом предупредит)
 
 ### Быстрый старт
@@ -143,3 +144,23 @@ pyinstaller --noconfirm --onedir --windowed --add-data "fonts;fonts" comic_types
 ```
 
 Готовый билд появится в папке `dist/comic_typesetter/`.
+
+Такой .exe работает только на **Windows 10 и 11**: Qt 6 и Python 3.13 вызывают функции Windows, которых нет в старых версиях, и упаковка в .exe этого не меняет.
+
+### Сборка для Windows 8.1
+
+Для старых машин программа собирается на **Qt 5** (PyQt5 5.15 — последняя Qt, которая поддерживает Windows 8.1) и **Python 3.10**. Код один и тот же: окно написано через прослойку [qtpy](https://github.com/spyder-ide/qtpy), которая берёт ту Qt, что установлена. Окружение нужно отдельное, чтобы в нём не было PyQt6:
+
+```bat
+py -3.10 -m venv venv-legacy
+venv-legacy\Scripts\pip install -r requirements-legacy.txt
+venv-legacy\Scripts\pyinstaller --noconfirm --onedir --windowed --add-data "fonts;fonts" --name comic_typesetter_win81 --workpath build\win81 comic_typesetter.py
+```
+
+Билд появится в `dist/comic_typesetter_win81/`, отдавать нужно всю папку. Что стоит знать:
+
+* Нужна именно **8.1** со всеми обновлениями. На Windows 8 без обновления до 8.1 Python 3.10 не запустится.
+* Если при запуске пишет, что нет `api-ms-win-crt-runtime-l1-1-0.dll`, на машину надо поставить [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist) (x64) или обновление KB2999226.
+* Сборка 64-битная. Для 32-битной Windows нужен 32-битный Python 3.10.
+* Шрифты на Qt 5 измеряются через GDI, а на Qt 6 через DirectWrite. GDI округляет высоту строки до пикселя, поэтому автоподбор местами ставит кегль на 1–1,5 пт меньше, чем обычная сборка. Проекты и PSD при этом совместимы между сборками.
+* Тесты в этом окружении: `venv-legacy\Scripts\pip install pytest psd-tools`, потом `venv-legacy\Scripts\python -m pytest`. Точные эталоны вёрстки записаны на Qt 6, поэтому на Qt 5 они пропускаются.

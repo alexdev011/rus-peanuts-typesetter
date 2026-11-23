@@ -6,9 +6,9 @@
 import math
 
 import cv2
-from PyQt6.QtCore import QPointF, QRectF, Qt
-from PyQt6.QtGui import QBrush, QColor, QFontMetrics, QImage, QPainter, QPainterPath, QPen, QPixmap
-from PyQt6.QtWidgets import QGraphicsScene, QGraphicsTextItem, QStyle, QStyleOptionGraphicsItem
+from qtpy.QtCore import QPointF, QRectF, Qt
+from qtpy.QtGui import QBrush, QColor, QFontMetrics, QImage, QPainter, QPainterPath, QPen, QPixmap
+from qtpy.QtWidgets import QGraphicsScene, QGraphicsTextItem, QStyle, QStyleOptionGraphicsItem
 
 from .document import Document, TextBlock
 

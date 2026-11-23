@@ -2,16 +2,17 @@
 from pathlib import Path
 
 import pytest
-from PyQt6.QtCore import Qt
-from PyQt6.QtTest import QTest
+from qtpy.QtCore import Qt
+from qtpy.QtTest import QTest
 
-from conftest import block_state, fixture_path
+from conftest import block_state, fixture_path, qt6_metrics
 
 DATA = Path(__file__).parent / "data"
 
 
 # ----------------------------------------------------------------- эталоны
 
+@qt6_metrics
 @pytest.mark.parametrize("strip, translation", [
     ("pe1963-04-08", DATA / "pe1963-04-08.txt"),
     ("pe1963-04-13", None),  # перевод вытащен из PSD команды
@@ -246,13 +247,13 @@ def test_undo_button_undoes_and_restores_selection(loaded):
 
 def drag(view, button, scene_points):
     """Штрих мышью по холсту через точки стрипа."""
-    from PyQt6.QtCore import QEvent, QPointF
-    from PyQt6.QtGui import QMouseEvent
-    from PyQt6.QtWidgets import QApplication
+    from qtpy.QtCore import QEvent, QPointF
+    from qtpy.QtGui import QMouseEvent
+    from qtpy.QtWidgets import QApplication
 
     def send(kind, pt, buttons):
         pos = QPointF(view.mapFromScene(QPointF(*pt)))
-        ev = QMouseEvent(kind, pos, view.viewport().mapToGlobal(pos), button, buttons,
+        ev = QMouseEvent(kind, pos, QPointF(view.viewport().mapToGlobal(pos.toPoint())), button, buttons,
                          Qt.KeyboardModifier.NoModifier)
         QApplication.sendEvent(view.viewport(), ev)
 

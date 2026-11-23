@@ -9,7 +9,7 @@ def ensure_dependencies():
         return
 
     required = [
-        ("PyQt6", "PyQt6"),
+        ("qtpy", "QtPy"),
         ("cv2", "opencv-python"),
         ("numpy", "numpy"),
         ("PIL", "Pillow"),
@@ -20,6 +20,10 @@ def ensure_dependencies():
             __import__(mod_name)
         except ImportError:
             missing.append(pip_name)
+    # qtpy — только прослойка: нужна сама Qt. Годится PyQt6 (обычная сборка)
+    # или PyQt5 (сборка для Windows 8.1, см. requirements-legacy.txt).
+    if not any(_importable(binding) for binding in ("PyQt6", "PyQt5")):
+        missing.append("PyQt6")
 
     if not missing:
         return
@@ -64,3 +68,11 @@ def ensure_dependencies():
         except Exception:
             pass
         sys.exit(1)
+
+
+def _importable(mod_name: str) -> bool:
+    try:
+        __import__(mod_name)
+    except ImportError:
+        return False
+    return True

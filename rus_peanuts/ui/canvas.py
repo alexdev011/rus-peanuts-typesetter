@@ -4,9 +4,9 @@
 рисует выбранным цветом, а блоки не выделяются и не двигаются. Правая кнопка
 мыши всегда рисует белым — быстрый ластик и без включённого Карандаша.
 """
-from PyQt6.QtCore import QPointF, Qt
-from PyQt6.QtGui import QColor, QCursor, QPainter, QPen, QPixmap
-from PyQt6.QtWidgets import QGraphicsView
+from qtpy.QtCore import QPointF, Qt
+from qtpy.QtGui import QColor, QCursor, QPainter, QPen, QPixmap
+from qtpy.QtWidgets import QGraphicsView
 
 from rus_peanuts.typesetting.document import WHITE
 

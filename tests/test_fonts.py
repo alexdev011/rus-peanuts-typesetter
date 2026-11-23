@@ -64,3 +64,26 @@ def test_install_rejects_non_fonts_without_copying(library, tmp_path):
     bad.write_bytes(b"not a font at all")
     assert library.install(str(bad)) is None
     assert not (tmp_path / "fonts").exists()
+
+
+@pytest.mark.parametrize("fname", sorted(p.name for p in FONTS.glob("*.ttf")))
+def test_renamed_font_is_accepted_by_windows_gdi(fname):
+    """GDI (движок шрифтов Qt 5 и Qt 6 до 6.8) молча отвергает шрифт без записи 3 в таблице name —
+    в сборке для Windows 8.1 весь текст был бы Comic Sans. Проверяем прямо через GDI."""
+    import ctypes
+    import sys
+    from ctypes import wintypes
+
+    from rus_peanuts.typesetting.fonts import rename_ttf_family
+
+    if sys.platform != "win32":
+        pytest.skip("GDI есть только в Windows")
+    data = rename_ttf_family((FONTS / fname).read_bytes(), "RusPeanutsFace001")
+    gdi = ctypes.windll.gdi32
+    gdi.AddFontMemResourceEx.restype = wintypes.HANDLE
+    gdi.RemoveFontMemResourceEx.argtypes = [wintypes.HANDLE]
+    count = wintypes.DWORD(0)
+    handle = gdi.AddFontMemResourceEx(ctypes.create_string_buffer(data, len(data)), len(data), None,
+                                      ctypes.byref(count))
+    assert handle, "GDI не принял переименованный шрифт"
+    gdi.RemoveFontMemResourceEx(handle)

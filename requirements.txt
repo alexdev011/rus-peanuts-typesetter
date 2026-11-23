@@ -1,3 +1,4 @@
+QtPy>=2.4
 PyQt6>=6.4.0
 opencv-python>=4.7.0
 numpy>=1.23.0

@@ -5,9 +5,9 @@
 """
 from dataclasses import dataclass
 
-from PyQt6.QtCore import QRectF, Qt
-from PyQt6.QtGui import QBrush, QColor, QFont, QFontMetricsF, QGuiApplication, QPen, QTextCharFormat, QTextCursor
-from PyQt6.QtWidgets import QGraphicsTextItem
+from qtpy.QtCore import QRectF, Qt
+from qtpy.QtGui import QBrush, QColor, QFont, QFontMetricsF, QGuiApplication, QPen, QTextCharFormat, QTextCursor
+from qtpy.QtWidgets import QGraphicsTextItem
 
 from .document import TextBlock
 from .fonts import FontLibrary

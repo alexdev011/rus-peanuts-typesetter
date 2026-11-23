@@ -1,6 +1,6 @@
 """Значки инструментов, нарисованные кодом (без файлов картинок)."""
-from PyQt6.QtCore import QPointF, Qt
-from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
+from qtpy.QtCore import QPointF, Qt
+from qtpy.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 
 
 def cursor_icon(size: int = 20) -> QIcon:
