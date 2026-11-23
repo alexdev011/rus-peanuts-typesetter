@@ -186,6 +186,17 @@ def test_save_all_from_window(window_batch, tmp_path, monkeypatch):
     assert window_batch.shown[-1].startswith("Сохранено стрипов: 4 из 4")
 
 
+
+def test_save_all_offers_the_multitool_result_folder(window_batch, tmp_path, monkeypatch):
+    from rus_peanuts.ui import main_window
+
+    monkeypatch.chdir(tmp_path)
+    asked = []
+    monkeypatch.setattr(main_window.QFileDialog, "getExistingDirectory",
+                        staticmethod(lambda parent, title, path: asked.append(path) or ""))
+    window_batch.win.save_all()
+    assert asked == [str(tmp_path / "result")]
+
 def test_leaving_batch_with_unsaved_edits_asks(window_batch, monkeypatch):
     from rus_peanuts.ui import main_window
 

@@ -9,6 +9,7 @@ from qtpy.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
+from rus_peanuts import publishing
 from rus_peanuts.export import psd
 from rus_peanuts.export.png import export_png
 from rus_peanuts.typesetting import analysis, project, translation
@@ -29,6 +30,13 @@ from .qt_setup import add_action
 
 cv2_to_qpixmap = to_qpixmap
 RECENT_FONTS = 5  # сколько недавних шрифтов показывать вверху списка
+
+
+def result_path(filename: str = "") -> str:
+    """Путь в папке result — той же, куда пишет Multi tool. Окна сохранения открываются в ней."""
+    folder = os.path.abspath(publishing.RESULT_DIR)
+    os.makedirs(folder, exist_ok=True)
+    return os.path.join(folder, filename) if filename else folder
 
 
 class MainWindow(QMainWindow):
@@ -645,7 +653,7 @@ class MainWindow(QMainWindow):
         if self.document.image is None:
             return
         self.scene.clearSelection()
-        out, _ = QFileDialog.getSaveFileName(self, "Сохранить", self.strip_name + ".png", "PNG (*.png)")
+        out, _ = QFileDialog.getSaveFileName(self, "Сохранить", result_path(self.strip_name + ".png"), "PNG (*.png)")
         if out:
             export_png(self.document, self.typography, out)
             self._mark_saved()
@@ -676,7 +684,7 @@ class MainWindow(QMainWindow):
     def save_project(self):
         if self.document.analysis is None:
             return
-        out, _ = QFileDialog.getSaveFileName(self, "Сохранить проект", self.strip_name + project.EXTENSION,
+        out, _ = QFileDialog.getSaveFileName(self, "Сохранить проект", result_path(self.strip_name + project.EXTENSION),
                                              f"Проект RUS PEANUTS (*{project.EXTENSION})")
         if not out:
             return
@@ -773,12 +781,8 @@ class MainWindow(QMainWindow):
     def save_all(self):
         if self.batch is None:
             return
-        default = self.batch.folder / "result"
-        default.mkdir(exist_ok=True)
-        out = QFileDialog.getExistingDirectory(self, "Куда сохранить Пачку", str(default))
+        out = QFileDialog.getExistingDirectory(self, "Куда сохранить Пачку", result_path())
         if not out:
-            if not any(default.iterdir()):
-                default.rmdir()
             return
         self.scene.clearSelection()
 
@@ -830,7 +834,8 @@ class MainWindow(QMainWindow):
     def export_psd(self):
         if self.document.image is None or self.psd_process is not None:
             return
-        out, _ = QFileDialog.getSaveFileName(self, "Экспорт в PSD", self.strip_name + ".psd", "Photoshop (*.psd)")
+        out, _ = QFileDialog.getSaveFileName(self, "Экспорт в PSD", result_path(self.strip_name + ".psd"),
+                                             "Photoshop (*.psd)")
         if not out:
             return
         self.scene.clearSelection()

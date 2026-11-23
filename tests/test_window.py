@@ -39,6 +39,24 @@ def test_status_after_image_only(typesetter):
     assert ts.win.lbl_status.text() == "Стрип очищен! Найдено баблов: 4, звуков: 0."
 
 
+
+def test_save_dialogs_open_in_the_multitool_result_folder(typesetter, tmp_path, monkeypatch):
+    """PNG, Проект и PSD предлагаются в ту же папку result, куда пишет Multi tool."""
+    from rus_peanuts.ui import main_window
+
+    monkeypatch.chdir(tmp_path)
+    asked = []
+    monkeypatch.setattr(main_window.QFileDialog, "getSaveFileName",
+                        staticmethod(lambda parent, title, path, *a: asked.append(path) or ("", "")))
+    ts = typesetter.load_image(fixture_path("strips", "pe1963-04-08.png"))
+    ts.win.save_result()
+    ts.win.save_project()
+    ts.win.export_psd()
+    result = tmp_path / "result"
+    assert [Path(p) for p in asked] == [result / "pe1963-04-08.png", result / "pe1963-04-08.rpeanuts",
+                                        result / "pe1963-04-08.psd"]
+    assert result.is_dir()
+
 def test_translation_loaded_before_image_is_applied_when_image_arrives(typography, typesetter):
     from conftest import Typesetter
 
